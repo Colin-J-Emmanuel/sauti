@@ -1,0 +1,23 @@
+[
+  {
+    "name": "Mama Asha",
+    "aliases": ["Asha", "Mama Juma"],
+    "payer": {
+      "name": "Juma",
+      "relation": "son",
+      "email": "REPLACE_WITH_SANDBOX_PERSONAL_EMAIL",
+      "city": "New York"
+    }
+  },
+  {
+    "name": "Bibi Rehema",
+    "aliases": ["Rehema"],
+    "payer": {
+      "name": "Neema",
+      "relation": "granddaughter",
+      "email": "REPLACE_WITH_SANDBOX_PERSONAL_EMAIL",
+      "city": "Houston"
+    }
+  },
+  { "name": "Baraka", "aliases": [] }
+]

@@ -1,0 +1,8 @@
+node_modules
+.next
+.env
+.env.local
+data/ledger.json
+next-env.d.ts
+*.tsbuildinfo
+data/events.json
