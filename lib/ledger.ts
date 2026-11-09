@@ -151,6 +151,41 @@ export async function balances() {
   return out;
 }
 
+export async function listContacts(): Promise<Contact[]> {
+  return readJson<Contact[]>(CONTACTS_FILE, []);
+}
+
+/** Edit distance, so "Mama Hasha" (a speech-to-text slip) still matches "Mama Asha". */
+function editDistance(a: string, b: string): number {
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+  for (let j = 1; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++)
+    for (let j = 1; j <= b.length; j++)
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+  return d[a.length][b.length];
+}
+
+/**
+ * Map a spoken/transcribed name to a known customer's exact spelling.
+ * Exact name or alias first, then a close match (1 letter off for short names, 2 for longer).
+ * Unknown names pass through unchanged — a new customer is fine.
+ */
+export async function canonicalCustomerName(spoken: string): Promise<string> {
+  const n = spoken.trim().toLowerCase();
+  const contacts = await listContacts();
+  const exact = contacts.find((c) => c.name.toLowerCase() === n || c.aliases.some((a) => a.toLowerCase() === n));
+  if (exact) return exact.name;
+  let best: { name: string; dist: number } | null = null;
+  for (const c of contacts) {
+    for (const cand of [c.name, ...c.aliases]) {
+      const dist = editDistance(n, cand.toLowerCase());
+      const allowed = cand.length <= 5 ? 1 : 2;
+      if (dist <= allowed && (!best || dist < best.dist)) best = { name: c.name, dist };
+    }
+  }
+  return best?.name ?? spoken.trim();
+}
+
 export async function findContact(name: string): Promise<Contact | null> {
   const contacts = await readJson<Contact[]>(CONTACTS_FILE, []);
   const n = name.trim().toLowerCase();
@@ -163,8 +198,14 @@ export async function findContact(name: string): Promise<Contact | null> {
     ) ??
     // "Tuma bili kwa Juma": the trader may name the relative abroad instead of the customer.
     contacts.find((c) => c.payer?.name.toLowerCase() === n) ??
-    null
+    // Last resort: a near-miss spelling from speech-to-text ("Mama Hasha" → Mama Asha).
+    (await fuzzyContact(name, contacts))
   );
+}
+
+async function fuzzyContact(name: string, contacts: Contact[]): Promise<Contact | null> {
+  const canonical = await canonicalCustomerName(name);
+  return contacts.find((c) => c.name === canonical) ?? null;
 }
 
 // ---------- PayPal invoice lifecycle (driven by webhooks) ----------

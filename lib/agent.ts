@@ -3,7 +3,7 @@ import { PayPalAgentToolkit } from "@paypal/agent-toolkit/ai-sdk";
 import { z } from "zod";
 import { appendTurn, loadHistory } from "./history";
 import { AGENT_MODELS, languageModel, transcribeVoiceNote } from "./models";
-import { activeEntries, addEntry, attachInvoice, balances, unbilledTab, voidEntries } from "./ledger";
+import { activeEntries, addEntry, canonicalCustomerName, listContacts, attachInvoice, balances, unbilledTab, voidEntries } from "./ledger";
 
 const TZS_PER_USD = Number(process.env.TZS_PER_USD ?? 2500);
 
@@ -76,7 +76,8 @@ const ledgerTools = {
       currency: z.enum(["TZS", "USD"]).describe("Default TZS unless dollars are mentioned"),
       note: z.string().optional(),
     }),
-    execute: async (args) => addEntry(args),
+    // Snap near-miss names from speech-to-text ("Mama Hasha") to the known customer ("Mama Asha").
+    execute: async (args) => addEntry({ ...args, counterparty: await canonicalCustomerName(args.counterparty) }),
   }),
 
   get_balances: tool({
@@ -145,6 +146,16 @@ Reply format (always, plain text, no markdown):
 First: a short, warm confirmation in Swahili of what you did (amounts in TZS as the trader said them).
 Last line: "EN: " followed by the English translation.`;
 
+/** Tell the model which customers exist, so it can spell names right even when transcription slips. */
+async function customersNote(): Promise<string> {
+  const contacts = await listContacts();
+  if (!contacts.length) return "";
+  const lines = contacts.map((c) =>
+    `- ${c.name}${c.aliases.length ? ` (also: ${c.aliases.join(", ")})` : ""}${c.payer ? ` — tab paid by ${c.payer.relation} ${c.payer.name} in ${c.payer.city}` : ""}`,
+  );
+  return `\n\nKnown customers (use these exact spellings; a voice note may mishear names, e.g. "Mama Hasha" = Mama Asha):\n${lines.join("\n")}`;
+}
+
 export type AgentInput =
   | { kind: "text"; text: string }
   | { kind: "audio"; data: Uint8Array; mimeType: string };
@@ -159,10 +170,11 @@ export async function runAgent(input: AgentInput, opts: { model?: LanguageModel 
   }
 
   const history = await loadHistory();
+  const system = SYSTEM + (await customersNote());
   const run = (model: LanguageModel, onStep: () => void) =>
     generateText({
       model,
-      system: SYSTEM,
+      system,
       messages: [
         ...history,
         { role: "user", content: userText },
