@@ -21,7 +21,7 @@ function splitReply(reply = "") {
   return { sw: sw.trim(), en: rest.join(" ").trim() };
 }
 
-export function TalkPanel({ onDone }: { onDone: () => void }) {
+export function TalkPanel({ onDone, compact = false }: { onDone: () => void; compact?: boolean }) {
   const [state, setState] = useState<"idle" | "recording" | "working">("idle");
   const [seconds, setSeconds] = useState(0);
   const [text, setText] = useState("");
@@ -94,25 +94,31 @@ export function TalkPanel({ onDone }: { onDone: () => void }) {
   return (
     <section aria-label="Talk to Sauti" className="flex flex-col text-white">
       {/* Mic */}
-      <div className="flex flex-col items-center pt-6 pb-2">
+      <div className={compact ? "flex items-center gap-4 pt-3" : "flex flex-col items-center pt-6 pb-2"}>
         <div className="relative">
           {state === "recording" && <span aria-hidden className="mic-ring absolute inset-0 rounded-full bg-marigold" />}
           <button
             onClick={toggleMic}
             disabled={state === "working"}
             aria-label={state === "recording" ? "Stop recording" : "Start recording"}
-            className="relative grid size-36 place-items-center rounded-full bg-marigold text-ink shadow-[0_10px_0_0_var(--marigold-deep)] transition-transform active:translate-y-[6px] active:shadow-[0_4px_0_0_var(--marigold-deep)] disabled:opacity-60 sm:size-40"
+            className={
+              "relative grid place-items-center rounded-full bg-marigold text-ink transition-transform disabled:opacity-60 " +
+              (compact
+                ? "size-16 shadow-[0_5px_0_0_var(--marigold-deep)] active:translate-y-[3px] active:shadow-[0_2px_0_0_var(--marigold-deep)]"
+                : "size-36 shadow-[0_10px_0_0_var(--marigold-deep)] active:translate-y-[6px] active:shadow-[0_4px_0_0_var(--marigold-deep)] sm:size-40")
+            }
           >
             {state === "working" ? (
-              <Loader2 className="size-12 animate-spin" />
+              <Loader2 className={compact ? "size-7 animate-spin" : "size-12 animate-spin"} />
             ) : state === "recording" ? (
-              <Square className="size-11 fill-current" />
+              <Square className={compact ? "size-6 fill-current" : "size-11 fill-current"} />
             ) : (
-              <Mic className="size-14" strokeWidth={2.2} />
+              <Mic className={compact ? "size-7" : "size-14"} strokeWidth={2.2} />
             )}
           </button>
         </div>
-        <p className="mt-6 text-xl font-semibold" aria-live="polite">
+        <div className={compact ? "" : "text-center"}>
+        <p className={compact ? "text-lg font-semibold" : "mt-6 text-xl font-semibold"} aria-live="polite">
           {state === "recording"
             ? `Nakusikiliza… 0:${String(seconds).padStart(2, "0")}`
             : state === "working"
@@ -122,6 +128,7 @@ export function TalkPanel({ onDone }: { onDone: () => void }) {
         <p className="text-sm text-ink-soft">
           {state === "recording" ? "Listening. Tap again when you're done." : state === "working" ? "Writing it down." : "Tap and speak in Swahili"}
         </p>
+        </div>
       </div>
 
       {/* Type instead */}
@@ -130,7 +137,7 @@ export function TalkPanel({ onDone }: { onDone: () => void }) {
           e.preventDefault();
           sendText(text);
         }}
-        className="mt-5 flex gap-2"
+        className={compact ? "mt-4 flex gap-2" : "mt-5 flex gap-2"}
       >
         <label htmlFor="say" className="sr-only">
           Type a message instead
@@ -149,7 +156,7 @@ export function TalkPanel({ onDone }: { onDone: () => void }) {
       </form>
 
       {/* Conversation */}
-      <div className="mt-6 min-h-24" aria-live="polite">
+      <div className={compact ? "mt-4" : "mt-6 min-h-24"} aria-live="polite">
         {pending && (
           <p className="ml-auto w-fit max-w-[90%] rounded-2xl rounded-br-sm bg-ink-2 px-4 py-2.5 text-[0.95rem]">
             {pending.spoken ? "🎙 …" : pending.said}
@@ -173,7 +180,7 @@ export function TalkPanel({ onDone }: { onDone: () => void }) {
                 </>
               )}
             </div>
-            <AgentSteps actions={last.reply.actions ?? []} />
+            {!compact && <AgentSteps actions={last.reply.actions ?? []} />}
           </>
         )}
         {!pending && !last && (
@@ -185,10 +192,10 @@ export function TalkPanel({ onDone }: { onDone: () => void }) {
                   <button
                     onClick={() => sendText(t.sw)}
                     disabled={state !== "idle"}
-                    className="w-full rounded-xl border border-ink-2 px-4 py-2.5 text-left transition-colors hover:bg-ink-2"
+                    className={"w-full rounded-xl border border-ink-2 text-left transition-colors hover:bg-ink-2 " + (compact ? "px-3 py-2" : "px-4 py-2.5")}
                   >
-                    <span className="block text-[0.95rem]">{t.sw}</span>
-                    <span className="block text-sm text-ink-soft">{t.en}</span>
+                    <span className={compact ? "block text-sm" : "block text-[0.95rem]"}>{t.sw}</span>
+                    {!compact && <span className="block text-sm text-ink-soft">{t.en}</span>}
                   </button>
                 </li>
               ))}
@@ -196,7 +203,7 @@ export function TalkPanel({ onDone }: { onDone: () => void }) {
           </div>
         )}
       </div>
-      {!pending && last && (
+      {!pending && last && !compact && (
         <details className="mt-5 text-sm text-ink-soft">
           <summary className="cursor-pointer">More things to try</summary>
           <ul className="mt-2 space-y-1.5">

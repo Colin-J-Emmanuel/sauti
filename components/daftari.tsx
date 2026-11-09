@@ -83,7 +83,7 @@ function TabSection({ tab, tzsPerUsd, freshPaymentAt }: { tab: Tab; tzsPerUsd: n
       <header className="daftari-row" style={{ alignItems: "end" }}>
         <span />
         <h3 className="truncate pl-4 font-hand text-[1.6rem] font-bold leading-tight text-ink">{tab.name}</h3>
-        <span className="col-span-2 hidden pr-3 text-right text-xs leading-tight text-muted-foreground sm:block">
+        <span className="col-span-2 hidden pr-3 text-right text-xs leading-tight text-muted-foreground @sm:block">
           {payer ? (
             <>
               Paid by {payer.relation} {payer.name}
@@ -95,7 +95,7 @@ function TabSection({ tab, tzsPerUsd, freshPaymentAt }: { tab: Tab; tzsPerUsd: n
           )}
         </span>
       </header>
-      <p className="daftari-row text-xs text-muted-foreground sm:hidden">
+      <p className="daftari-row text-xs text-muted-foreground @sm:hidden">
         <span />
         <span className="col-span-3 truncate pl-4 pr-3">
           {payer ? `Paid by ${payer.relation} ${payer.name} in ${payer.city}, via PayPal` : "Pays at the shop"}
@@ -112,8 +112,8 @@ function TabSection({ tab, tzsPerUsd, freshPaymentAt }: { tab: Tab; tzsPerUsd: n
         <p key={w.invoiceId} className="daftari-row text-sm text-pen">
           <span />
           <span className="col-span-3 truncate pl-4">
-            <span className="sm:hidden">Invoice ${(w.tzs / tzsPerUsd).toFixed(2)} sent, awaiting payment</span>
-            <span className="hidden sm:inline">
+            <span className="@sm:hidden">Invoice ${(w.tzs / tzsPerUsd).toFixed(2)} sent, awaiting payment</span>
+            <span className="hidden @sm:inline">
               PayPal invoice for ${(w.tzs / tzsPerUsd).toFixed(2)} sent to {payer?.name ?? "the family"}. Waiting for payment.
             </span>
           </span>
@@ -135,7 +135,7 @@ function TabSection({ tab, tzsPerUsd, freshPaymentAt }: { tab: Tab; tzsPerUsd: n
       {settled && (
         <div
           key={tab.paidNotice!.at}
-          className={"stamp pointer-events-none absolute right-4 top-1 origin-top-right scale-[0.8] text-center sm:bottom-[3.1rem] sm:right-[11rem] sm:top-auto sm:origin-bottom-right sm:scale-100 " + (freshPaymentAt === tab.paidNotice!.at ? "stamp-land" : "")}
+          className={"stamp pointer-events-none absolute right-4 top-1 origin-top-right scale-[0.8] text-center @sm:bottom-[3.1rem] @sm:right-[11rem] @sm:top-auto @sm:origin-bottom-right @sm:scale-100 " + (freshPaymentAt === tab.paidNotice!.at ? "stamp-land" : "")}
           role="img"
           aria-label={`Paid in full via PayPal by ${tab.paidNotice!.payer ?? "family"}`}
         >
@@ -147,22 +147,31 @@ function TabSection({ tab, tzsPerUsd, freshPaymentAt }: { tab: Tab; tzsPerUsd: n
   );
 }
 
-export function Daftari({ data, freshPaymentAt }: { data: LedgerData | null; freshPaymentAt?: string }) {
+export function Daftari({ data, freshPaymentAt, compact = false }: { data: LedgerData | null; freshPaymentAt?: string; compact?: boolean }) {
   const tabs = data ? buildTabs(data) : [];
   const totalOwed = tabs.reduce((s, t) => s + Math.max(t.owed, 0), 0);
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex max-w-[54rem] items-end justify-between gap-4 px-6 pb-4 pt-6 sm:px-8">
-        <div>
-          <h2 className="text-2xl font-bold text-ink">Daftari</h2>
-          <p className="text-sm text-muted-foreground">The shop's credit book, written as you speak</p>
+    <div className="@container flex h-full flex-col">
+      {compact ? (
+        <div className="flex items-baseline justify-between gap-3 px-4 pb-2 pt-3">
+          <h2 className="text-lg font-bold text-ink">Daftari</h2>
+          <p className="text-sm text-muted-foreground">
+            Owed <span className="font-bold tabular-nums text-ink">{num(totalOwed)} TZS</span>
+          </p>
         </div>
-        <p className="shrink-0 text-right text-sm text-muted-foreground">
-          Customers owe
-          <span className="block whitespace-nowrap text-2xl font-bold tabular-nums text-ink">{num(totalOwed)} TZS</span>
-        </p>
-      </div>
+      ) : (
+        <div className="flex max-w-[54rem] items-end justify-between gap-4 px-6 pb-4 pt-6 @sm:px-8">
+          <div>
+            <h2 className="text-2xl font-bold text-ink">Daftari</h2>
+            <p className="text-sm text-muted-foreground">The shop's credit book, written as you speak</p>
+          </div>
+          <p className="shrink-0 text-right text-sm text-muted-foreground">
+            Customers owe
+            <span className="block whitespace-nowrap text-2xl font-bold tabular-nums text-ink">{num(totalOwed)} TZS</span>
+          </p>
+        </div>
+      )}
 
       <div className="daftari min-h-[28rem] flex-1 overflow-y-auto rounded-t-lg border-t border-rule pt-[2.25rem] shadow-[0_-1px_0_0_var(--rule)]">
         {!data ? (
