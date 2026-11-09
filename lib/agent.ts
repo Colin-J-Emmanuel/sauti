@@ -101,7 +101,7 @@ const ledgerTools = {
 
   get_family_tab: tool({
     description:
-      "Get a customer's unbilled credit purchases, already converted to USD, and the relative abroad who pays for them (payer). Call before creating a family-tab invoice.",
+      "Get a customer's unbilled credit purchases, already converted to USD, and the relative abroad who pays for them (payer). Call before creating a family-tab invoice. Accepts the customer's name OR the relative's name (e.g. 'Juma' returns Mama Asha's tab).",
     inputSchema: z.object({ customer: z.string() }),
     execute: async ({ customer }) => unbilledTab(customer, TZS_PER_USD),
   }),

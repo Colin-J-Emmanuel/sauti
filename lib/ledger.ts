@@ -160,7 +160,10 @@ export async function findContact(name: string): Promise<Contact | null> {
         c.name.toLowerCase() === n ||
         c.aliases.some((a) => a.toLowerCase() === n) ||
         c.name.toLowerCase().includes(n),
-    ) ?? null
+    ) ??
+    // "Tuma bili kwa Juma": the trader may name the relative abroad instead of the customer.
+    contacts.find((c) => c.payer?.name.toLowerCase() === n) ??
+    null
   );
 }
 
