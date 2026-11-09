@@ -34,7 +34,10 @@ npm run dev                        # UI at http://localhost:3000
 - `app/api/agent` — POST `audio` or `text`
 - `app/api/paypal/webhook` — verifies PayPal signatures, ignores retried duplicates, settles paid invoices, un-bills cancelled ones
 - `lib/paypal.ts` — OAuth token (cached, refreshed before expiry) + webhook signature verification
-- `app/page.tsx` — record button, ledger, live "payment received" banner
+- `app/page.tsx` — the app: mic + daftari (the shop's ruled credit book)
+- `app/demo/page.tsx` — two-cities demo view: the shop's phone and the family's phone side by side
+- `app/api/whatsapp` — WhatsApp voice notes and texts via the Twilio Sandbox; replies and payment alerts go back on WhatsApp
+- `lib/whatsapp.ts` — Twilio signature check, media download, sending messages
 - `render.yaml` — one-click deploy on Render
 
 The ledger keeps shillings; invoices go out in USD (the payer's currency) at `TZS_PER_USD`.

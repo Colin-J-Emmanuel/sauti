@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { runAfterResponse, sendWhatsApp, shopNumber, whatsappEnabled } from "@/lib/whatsapp";
 import { verifyWebhook } from "@/lib/paypal";
 import { markEventProcessed, settleInvoice, unbillInvoice } from "@/lib/ledger";
 
@@ -21,7 +22,22 @@ export async function POST(req: Request) {
 
   switch (event.event_type) {
     case "INVOICING.INVOICE.PAID":
-      return NextResponse.json({ ok: true, notice: await settleInvoice(invoiceId) });
+    {
+      const notice = await settleInvoice(invoiceId);
+      // Tell the shopkeeper on WhatsApp too (after answering PayPal, so a slow message never delays the webhook).
+      if (notice && whatsappEnabled()) {
+        runAfterResponse(async () => {
+          const to = await shopNumber();
+          if (!to) return;
+          const who = notice.payer?.split(" (")[0] ?? "Familia";
+          await sendWhatsApp(
+            to,
+            `💸 *${who} amelipa ${notice.amountTzs.toLocaleString("en-US")} TZS* kwa ${notice.customer} kupitia PayPal. Deni limefutwa.\n\n_EN: ${notice.payer ?? "Family abroad"} paid ${notice.customer}'s tab with PayPal. The tab is cleared._`,
+          );
+        });
+      }
+      return NextResponse.json({ ok: true, notice });
+    }
     case "INVOICING.INVOICE.CANCELLED":
       return NextResponse.json({ ok: true, unbilled: await unbillInvoice(invoiceId) });
     default:

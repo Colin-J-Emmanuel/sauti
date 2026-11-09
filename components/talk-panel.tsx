@@ -81,7 +81,9 @@ export function TalkPanel({ onDone, compact = false }: { onDone: () => void; com
       stream.getTracks().forEach((t) => t.stop());
       const blob = new Blob(chunks.current, { type: rec.mimeType });
       const f = new FormData();
-      f.append("audio", new File([blob], "note.webm", { type: rec.mimeType }));
+      // Safari/iPhone records audio/mp4, Chrome records audio/webm: name the file to match.
+      const ext = rec.mimeType.includes("mp4") ? "m4a" : rec.mimeType.includes("ogg") ? "ogg" : "webm";
+      f.append("audio", new File([blob], `note.${ext}`, { type: rec.mimeType }));
       send(f, "", true);
     };
     rec.start();
@@ -203,7 +205,7 @@ export function TalkPanel({ onDone, compact = false }: { onDone: () => void; com
           </div>
         )}
       </div>
-      {!pending && last && !compact && (
+      {!pending && last && (
         <details className="mt-5 text-sm text-ink-soft">
           <summary className="cursor-pointer">More things to try</summary>
           <ul className="mt-2 space-y-1.5">

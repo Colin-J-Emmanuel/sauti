@@ -7,3 +7,4 @@ next-env.d.ts
 *.tsbuildinfo
 data/events.json
 data/history.json
+data/whatsapp.json

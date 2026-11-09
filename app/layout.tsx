@@ -8,6 +8,7 @@ import { Toaster } from "@/components/ui/sonner";
 export const metadata: Metadata = {
   title: "Sauti",
   description: "A Swahili voice ledger for corner shops that bills family abroad through PayPal.",
+  appleWebApp: { capable: true, title: "Sauti", statusBarStyle: "black-translucent" },
 };
 
 export const viewport: Viewport = { themeColor: "#1b2650", width: "device-width", initialScale: 1 };
