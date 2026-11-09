@@ -1,10 +1,23 @@
-export const metadata = { title: "Sauti Ledger", description: "Swahili voice ledger with PayPal" };
+import type { Metadata, Viewport } from "next";
+import "@fontsource-variable/bricolage-grotesque";
+import "@fontsource/kalam/400.css";
+import "@fontsource/kalam/700.css";
+import "./globals.css";
+import { Toaster } from "@/components/ui/sonner";
+
+export const metadata: Metadata = {
+  title: "Sauti",
+  description: "A Swahili voice ledger for corner shops that bills family abroad through PayPal.",
+};
+
+export const viewport: Viewport = { themeColor: "#1b2650", width: "device-width", initialScale: 1 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="sw">
-      <body style={{ margin: 0, fontFamily: "system-ui, sans-serif", background: "#f6f4ef" }}>
+      <body>
         {children}
+        <Toaster position="top-center" richColors />
       </body>
     </html>
   );

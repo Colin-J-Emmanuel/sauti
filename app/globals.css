@@ -1,0 +1,177 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/* ------------------------------------------------------------------
+   Sauti design tokens
+   Ink navy shell, daftari paper, ruled-line blue, margin red,
+   shop-sign marigold (the mic only), paid green.
+------------------------------------------------------------------- */
+:root {
+  color-scheme: light;
+
+  --ink: #1b2650;
+  --ink-2: #26346a;
+  --ink-soft: #b9c2e0;
+  --paper: #fafaf6;
+  --rule: #bfd0ee;
+  --margin: #d2433b;
+  --marigold: #f2b632;
+  --marigold-deep: #d89a12;
+  --paid: #1e8449;
+  --pen: #213a86; /* ballpoint blue for handwriting */
+
+  /* shadcn semantic tokens */
+  --radius: 0.625rem;
+  --background: var(--paper);
+  --foreground: #1a1f33;
+  --card: #ffffff;
+  --card-foreground: #1a1f33;
+  --popover: #ffffff;
+  --popover-foreground: #1a1f33;
+  --primary: var(--ink);
+  --primary-foreground: #ffffff;
+  --secondary: #eef1f8;
+  --secondary-foreground: var(--ink);
+  --muted: #eef1f8;
+  --muted-foreground: #5a6380;
+  --accent: #eef1f8;
+  --accent-foreground: var(--ink);
+  --border: #dde3f0;
+  --input: #dde3f0;
+  --ring: var(--marigold);
+}
+
+@theme inline {
+  --font-sans: "Bricolage Grotesque Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-hand: "Kalam", "Segoe Print", cursive;
+
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-soft: var(--ink-soft);
+  --color-paper: var(--paper);
+  --color-rule: var(--rule);
+  --color-margin: var(--margin);
+  --color-marigold: var(--marigold);
+  --color-marigold-deep: var(--marigold-deep);
+  --color-paid: var(--paid);
+  --color-pen: var(--pen);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  html,
+  body {
+    background: var(--ink);
+  }
+  body {
+    @apply font-sans text-foreground antialiased;
+    font-feature-settings: "ss01";
+  }
+  :focus-visible {
+    outline: 3px solid var(--marigold);
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+/* ------------------------------------------------------------------
+   The daftari: a blue-ruled exercise-book page with a red margin.
+   Rows are 2.25rem tall so text sits on the printed lines.
+------------------------------------------------------------------- */
+.daftari {
+  --line: 2.25rem;
+  --margin-x: 4.25rem;
+  background-color: var(--paper);
+  background-image:
+    linear-gradient(to right, transparent calc(var(--margin-x) - 1px), var(--margin) calc(var(--margin-x) - 1px), var(--margin) var(--margin-x), transparent var(--margin-x)),
+    linear-gradient(to right, transparent calc(var(--margin-x) + 3px), color-mix(in srgb, var(--margin) 55%, transparent) calc(var(--margin-x) + 3px), color-mix(in srgb, var(--margin) 55%, transparent) calc(var(--margin-x) + 4px), transparent calc(var(--margin-x) + 4px)),
+    repeating-linear-gradient(to bottom, transparent 0, transparent calc(var(--line) - 1px), var(--rule) calc(var(--line) - 1px), var(--rule) var(--line));
+  background-attachment: local;
+}
+
+.daftari-row {
+  min-height: var(--line);
+  display: grid;
+  grid-template-columns: var(--margin-x) minmax(0, 1fr) auto 1.75rem;
+  column-gap: 0.5rem;
+  align-items: end;
+  padding-bottom: 0.3rem;
+}
+
+/* Rubber stamp that lands when PayPal confirms a payment. */
+.stamp {
+  font-family: var(--font-sans);
+  color: var(--paid);
+  border: 3px solid currentColor;
+  border-radius: 0.4rem;
+  padding: 0.2rem 0.6rem 0.25rem;
+  transform: rotate(-9deg);
+  mix-blend-mode: multiply;
+  opacity: 0.88;
+  line-height: 1.05;
+}
+.stamp-land {
+  animation: stamp-land 520ms cubic-bezier(0.2, 1.4, 0.4, 1) both;
+}
+
+/* Mic: a ring that breathes only while recording (user-triggered). */
+.mic-ring {
+  animation: mic-ring 1.4s ease-out infinite;
+}
+}
+
+@keyframes stamp-land {
+  0% {
+    transform: rotate(-9deg) scale(2.6);
+    opacity: 0;
+  }
+  60% {
+    opacity: 0.95;
+  }
+  100% {
+    transform: rotate(-9deg) scale(1);
+    opacity: 0.88;
+  }
+}
+@keyframes mic-ring {
+  from {
+    transform: scale(1);
+    opacity: 0.55;
+  }
+  to {
+    transform: scale(1.45);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stamp-land,
+  .mic-ring {
+    animation: none;
+  }
+}

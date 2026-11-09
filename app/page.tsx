@@ -1,161 +1,74 @@
 "use client";
 
-// Bare-bones UI so the loop works end to end. Design polish comes later.
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
+import { TalkPanel } from "@/components/talk-panel";
+import { Daftari } from "@/components/daftari";
+import type { LedgerData, Notice } from "@/lib/types";
 
-type Action = { tool: string; args: unknown; result: unknown };
-type Entry = {
-  id: string;
-  type: string;
-  counterparty: string;
-  item?: string;
-  amount: number;
-  currency: string;
-  paypalInvoiceId?: string;
-  paidAt?: string;
-  note?: string;
-};
-type Notice = { invoiceId: string; customer: string; payer?: string; amountTzs: number; at: string };
+function announce(n: Notice) {
+  const who = n.payer?.split(" (")[0] ?? "Familia";
+  toast.success(`${who} amelipa ${n.amountTzs.toLocaleString("en-US")} TZS`, {
+    description: `${n.payer ?? "Family abroad"} paid ${n.customer}'s tab with PayPal.`,
+    duration: 8000,
+  });
+  try {
+    const u = new SpeechSynthesisUtterance(`${who} amelipa shilingi ${n.amountTzs} kwa ${n.customer}`);
+    u.lang = "sw-TZ";
+    speechSynthesis.speak(u);
+  } catch {
+    /* speech is a bonus */
+  }
+}
 
 export default function Home() {
-  const [notice, setNotice] = useState<Notice | null>(null);
+  const [data, setData] = useState<LedgerData | null>(null);
+  const [freshPaymentAt, setFreshPaymentAt] = useState<string>();
   const seen = useRef<string | null>(null);
-  const [recording, setRecording] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [text, setText] = useState("");
-  const [reply, setReply] = useState("");
-  const [actions, setActions] = useState<Action[]>([]);
-  const [entries, setEntries] = useState<Entry[]>([]);
-  const recorder = useRef<MediaRecorder | null>(null);
-  const chunks = useRef<Blob[]>([]);
 
-  const refresh = async () => {
-    const data = await (await fetch("/api/ledger")).json();
-    setEntries(data.entries);
-    const latest: Notice | undefined = data.notices?.[0];
-    if (latest && seen.current !== null && latest.at !== seen.current) {
-      setNotice(latest); // a PayPal payment arrived via webhook since we last looked
-      try {
-        const u = new SpeechSynthesisUtterance(
-          `${latest.payer?.split(" ")[0] ?? "Familia"} amelipa shilingi ${latest.amountTzs} kwa ${latest.customer}`,
-        );
-        u.lang = "sw-TZ";
-        speechSynthesis.speak(u);
-      } catch {}
+  const refresh = useCallback(async () => {
+    try {
+      const d = (await (await fetch("/api/ledger", { cache: "no-store" })).json()) as LedgerData;
+      setData(d);
+      const latest = d.notices?.[0];
+      // Only announce payments that arrive while the page is open.
+      if (latest && seen.current !== null && latest.at !== seen.current) {
+        setFreshPaymentAt(latest.at);
+        announce(latest);
+      }
+      seen.current = latest?.at ?? "";
+    } catch {
+      /* keep the last good view; next poll will retry */
     }
-    seen.current = latest?.at ?? "";
-  };
-  useEffect(() => {
-    refresh();
-    const t = setInterval(refresh, 4000);
-    return () => clearInterval(t);
   }, []);
 
-  async function send(form: FormData) {
-    setBusy(true);
-    setReply("");
-    setActions([]);
-    try {
-      const res = await (await fetch("/api/agent", { method: "POST", body: form })).json();
-      setReply((res.transcript ? `🎙 "${res.transcript}"\n\n` : "") + (res.reply ?? res.error));
-      setActions(res.actions ?? []);
-      await refresh();
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function toggleRecord() {
-    if (recording) {
-      recorder.current?.stop();
-      setRecording(false);
-      return;
-    }
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    const rec = new MediaRecorder(stream);
-    chunks.current = [];
-    rec.ondataavailable = (e) => chunks.current.push(e.data);
-    rec.onstop = () => {
-      stream.getTracks().forEach((t) => t.stop());
-      const blob = new Blob(chunks.current, { type: rec.mimeType });
-      const f = new FormData();
-      f.append("audio", new File([blob], "note.webm", { type: rec.mimeType }));
-      send(f);
-    };
-    rec.start();
-    recorder.current = rec;
-    setRecording(true);
-  }
+  useEffect(() => {
+    refresh();
+    // PayPal's webhook updates the server; the page checks every few seconds.
+    const t = setInterval(refresh, 4000);
+    return () => clearInterval(t);
+  }, [refresh]);
 
   return (
-    <main style={{ maxWidth: 480, margin: "0 auto", padding: 16 }}>
-      <h1 style={{ marginBottom: 4 }}>Sauti</h1>
-      <p style={{ marginTop: 0, color: "#555" }}>Ongea, tunaandika. (Speak, we keep the books.)</p>
-
-      {notice && (
-        <div
-          onClick={() => setNotice(null)}
-          style={{ background: "#1f6f4a", color: "#fff", padding: 14, borderRadius: 12, marginBottom: 12 }}
-        >
-          💸 <b>{notice.payer ?? "Familia"}</b> amelipa {notice.amountTzs.toLocaleString()} TZS kwa{" "}
-          {notice.customer} kupitia PayPal.
-          <div style={{ opacity: 0.85, fontSize: 13 }}>
-            EN: {notice.payer ?? "Family"} paid {notice.customer}&apos;s tab via PayPal.
-          </div>
-        </div>
-      )}
-
-      <button
-        onClick={toggleRecord}
-        disabled={busy}
-        style={{
-          width: "100%", padding: 24, fontSize: 20, borderRadius: 16, border: 0, color: "#fff",
-          background: recording ? "#c0392b" : "#1f6f4a",
-        }}
-      >
-        {busy ? "Inafanya kazi…" : recording ? "■ Simamisha (stop)" : "🎙 Bonyeza uongee (tap to speak)"}
-      </button>
-
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (!text.trim()) return;
-          const f = new FormData();
-          f.append("text", text);
-          send(f);
-          setText("");
-        }}
-        style={{ display: "flex", gap: 8, marginTop: 12 }}
-      >
-        <input
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          placeholder="…au andika hapa (or type)"
-          style={{ flex: 1, padding: 12, borderRadius: 10, border: "1px solid #ccc" }}
-        />
-        <button disabled={busy} style={{ padding: "0 16px", borderRadius: 10 }}>Tuma</button>
-      </form>
-
-      {reply && (
-        <div style={{ background: "#fff", padding: 12, borderRadius: 12, marginTop: 16, whiteSpace: "pre-wrap" }}>
-          {reply}
-        </div>
-      )}
-      {actions.length > 0 && (
-        <details style={{ marginTop: 8 }}>
-          <summary>What the agent did ({actions.length})</summary>
-          <pre style={{ fontSize: 11, overflowX: "auto" }}>{JSON.stringify(actions, null, 2)}</pre>
-        </details>
-      )}
-
-      <h2 style={{ fontSize: 16, marginTop: 24 }}>Daftari (Ledger)</h2>
-      {entries.map((e) => (
-        <div key={e.id} style={{ background: "#fff", padding: 10, borderRadius: 10, marginBottom: 6 }}>
-          <b>{e.counterparty}</b> · {e.type} · {e.amount.toLocaleString()} {e.currency}
-          {e.item ? ` · ${e.item}` : ""}
-          {e.paidAt ? " · ✅ paid via PayPal" : e.paypalInvoiceId ? " · 🧾 billed to family abroad" : ""}
-        </div>
-      ))}
+    <main className="min-h-dvh lg:grid lg:h-dvh lg:grid-cols-[minmax(22rem,30rem)_1fr]">
+      <div className="bg-ink px-5 pb-10 pt-6 sm:px-8 lg:overflow-y-auto">
+        <header className="flex items-baseline justify-between gap-3">
+          <h1 className="text-3xl font-extrabold tracking-tight text-white">Sauti</h1>
+          <p className="text-right text-sm leading-tight text-ink-soft">
+            Duka la Mzee Salim
+            <br />
+            Dar es Salaam
+          </p>
+        </header>
+        <TalkPanel onDone={refresh} />
+        <p className="mt-10 text-xs leading-relaxed text-ink-soft/80">
+          Demo running on PayPal's sandbox: invoices and payments are test money. Amounts are kept in shillings and
+          invoiced in US dollars at {data?.tzsPerUsd ?? 2500} TZS to $1.
+        </p>
+      </div>
+      <div className="bg-paper lg:overflow-hidden lg:rounded-l-2xl">
+        <Daftari data={data} freshPaymentAt={freshPaymentAt} />
+      </div>
     </main>
   );
 }
