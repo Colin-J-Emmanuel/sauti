@@ -12,7 +12,9 @@ services:
         sync: false
       - key: PAYPAL_CLIENT_SECRET
         sync: false
-      - key: GOOGLE_GENERATIVE_AI_API_KEY
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: ELEVENLABS_API_KEY
         sync: false
       - key: PAYPAL_WEBHOOK_ID
         sync: false

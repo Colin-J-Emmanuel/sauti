@@ -57,7 +57,7 @@ export default function Home() {
     setActions([]);
     try {
       const res = await (await fetch("/api/agent", { method: "POST", body: form })).json();
-      setReply(res.reply ?? res.error);
+      setReply((res.transcript ? `🎙 "${res.transcript}"\n\n` : "") + (res.reply ?? res.error));
       setActions(res.actions ?? []);
       await refresh();
     } finally {

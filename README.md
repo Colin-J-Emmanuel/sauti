@@ -4,7 +4,7 @@ A shopkeeper in Dar es Salaam speaks in Swahili: *"Mama Asha amechukua mchele wa
 Sauti records it in the shop's ledger (TZS) and sends a PayPal invoice in USD to Mama Asha's son in New York, who pays the shop directly.
 Diaspora money goes straight to the family's groceries instead of through a remittance; the shop withdraws to M-Pesa (PayPal × M-Pesa, Tanzania 2026).
 
-**Stack:** Next.js 15 · Vercel AI SDK v4 · Gemini 2.5 Flash (hears Swahili audio directly) · PayPal Agent Toolkit (sandbox, invoices) · PayPal Webhooks · Render.
+**Stack:** Next.js 15 · Vercel AI SDK · ElevenLabs Scribe (Swahili speech-to-text) · Claude Haiku (agent + tool calling, with fallback) · PayPal Agent Toolkit (sandbox, invoices) · PayPal Webhooks · Render.
 
 **The loop:** speak → ledger entry (TZS) → agent creates + sends a USD PayPal invoice to the relative abroad → relative pays → PayPal webhook `INVOICING.INVOICE.PAID` → tab marked paid and the shop is told, out loud, in Swahili.
 
@@ -12,7 +12,7 @@ Diaspora money goes straight to the family's groceries instead of through a remi
 
 ```bash
 npm install
-cp .env.example .env    # fill in PayPal sandbox + Gemini keys
+cp .env.example .env    # fill in PayPal sandbox, Anthropic and ElevenLabs keys
 ```
 
 In `data/contacts.json`, each customer can have a `payer` (the relative abroad). Replace `REPLACE_WITH_SANDBOX_PERSONAL_EMAIL` with your **sandbox personal account** email (developer.paypal.com → Testing Tools → Sandbox Accounts) so you can log in as "Juma" and pay the invoice in the demo.
@@ -27,7 +27,8 @@ npm run dev                        # UI at http://localhost:3000
 
 ## Layout
 
-- `lib/agent.ts` — system prompt, ledger tools, PayPal tools, Gemini call
+- `lib/agent.ts` — system prompt, ledger tools, PayPal tools, model fallback
+- `lib/models.ts` — which models to use (from `.env`), ElevenLabs transcription
 - `lib/ledger.ts` — JSON-file ledger, balances, family tab (unbilled items + payer abroad)
 - `data/contacts.json` — customers and the relatives who pay their tabs
 - `app/api/agent` — POST `audio` or `text`

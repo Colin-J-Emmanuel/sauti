@@ -4,8 +4,9 @@
 //   npm run test:agent -- "Baraka amelipa 5,000"
 import "dotenv/config";
 import { runAgent } from "../lib/agent";
+import { clearHistory } from "../lib/history";
 
-for (const k of ["PAYPAL_CLIENT_ID", "PAYPAL_CLIENT_SECRET", "GOOGLE_GENERATIVE_AI_API_KEY"]) {
+for (const k of ["PAYPAL_CLIENT_ID", "PAYPAL_CLIENT_SECRET", "ANTHROPIC_API_KEY"]) {
   if (!process.env[k]) throw new Error(`Missing ${k} in .env`);
 }
 
@@ -20,6 +21,7 @@ const turns = custom
     ];
 
 async function main() {
+if (!custom) await clearHistory(); // the demo sequence starts a fresh conversation
 for (const text of turns) {
   console.log("\n> " + text);
   const { reply, actions } = await runAgent({ kind: "text", text });
