@@ -1,8 +1,12 @@
 # Sauti — Swahili voice ledger with PayPal
 
-A shopkeeper in Dar es Salaam speaks in Swahili: *"Mama Asha amechukua mchele wa 15,000 kwa mkopo… tuma bili kwa mwanawe Marekani."*
-Sauti records it in the shop's ledger (TZS) and sends a PayPal invoice in USD to Mama Asha's son in New York, who pays the shop directly.
-Diaspora money goes straight to the family's groceries instead of through a remittance; the shop withdraws to M-Pesa (PayPal × M-Pesa, Tanzania 2026).
+A PayPal agent that speaks Swahili. A shopkeeper in Dar es Salaam says what a customer took: *"Mama Asha amechukua mchele wa 15,000."*
+Sauti writes it in the shop's daftari, and keeps Mama Asha's **family wallet (pochi ya familia)** funded by her son in New York:
+
+- When the wallet is empty or low, Sauti itself sends him a PayPal request to top it up.
+- When he pays, PayPal's webhook credits the wallet, clears anything she owed, and the shopkeeper is told (in the app and on WhatsApp).
+- Her next purchases are paid on the spot from the wallet, so the shop carries no credit risk and the family sees exactly what the money bought.
+- Sauti also answers "who hasn't paid?", sends PayPal reminders, and advises on credit from the family's PayPal payment record.
 
 **Stack:** Next.js 15 · Vercel AI SDK · ElevenLabs Scribe (Swahili speech-to-text) · Claude Haiku (agent + tool calling, with fallback) · PayPal Agent Toolkit (sandbox, invoices) · PayPal Webhooks · Render.
 

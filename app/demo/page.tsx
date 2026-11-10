@@ -5,12 +5,13 @@ import Link from "next/link";
 import { Check, ExternalLink } from "lucide-react";
 import { TalkPanel } from "@/components/talk-panel";
 import { Daftari } from "@/components/daftari";
+import { AgentSteps } from "@/components/agent-steps";
 import { useLedger } from "@/hooks/use-ledger";
-import type { Entry, LedgerData } from "@/lib/types";
+import type { AgentAction, Entry, LedgerData } from "@/lib/types";
+
+const tzs = (n: number) => `${Math.round(n).toLocaleString("en-US")} TZS`;
 
 /* ---------------- data: what the family abroad sees ---------------- */
-
-type Invoice = { id: string; entries: Entry[]; tzs: number; usd: number; paid: boolean; lastAt: string };
 
 function familyView(data: LedgerData | null) {
   if (!data) return null;
@@ -20,21 +21,36 @@ function familyView(data: LedgerData | null) {
   const lastActivity = (name: string) =>
     data.entries.filter((e) => e.counterparty === name).reduce((m, e) => (e.createdAt > m ? e.createdAt : m), "");
   const customer = [...withPayer].sort((a, b) => lastActivity(b.name).localeCompare(lastActivity(a.name)))[0];
+  const mine = data.entries.filter((e) => e.counterparty === customer.name);
+  const usd = (t: number) => Math.round((t / data.tzsPerUsd) * 100) / 100;
 
-  const credit = data.entries.filter((e) => e.counterparty === customer.name && e.type === "credit_sale");
-  const byInvoice = new Map<string, Entry[]>();
-  for (const e of credit) if (e.paypalInvoiceId) byInvoice.set(e.paypalInvoiceId, [...(byInvoice.get(e.paypalInvoiceId) ?? []), e]);
-  const usdOf = (e: Entry) => (e.currency === "USD" ? e.amount : Math.round((e.amount / data.tzsPerUsd) * 100) / 100);
-  const invoices: Invoice[] = [...byInvoice].map(([id, es]) => ({
-    id,
-    entries: [...es].sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
-    tzs: es.filter((e) => e.currency === "TZS").reduce((s, e) => s + e.amount, 0),
-    usd: Math.round(es.reduce((s, e) => s + usdOf(e), 0) * 100) / 100,
-    paid: es.every((e) => !!e.paidAt),
-    lastAt: es.reduce((m, e) => (e.createdAt > m ? e.createdAt : m), ""),
-  }));
-  const latest = invoices.sort((a, b) => b.lastAt.localeCompare(a.lastAt))[0];
-  return { customer, hasSales: credit.length > 0, latest, usdOf };
+  const purchases = mine.filter((e) => e.type === "wallet_sale" || e.type === "credit_sale"); // newest first
+  const topups = data.topups.filter((t) => t.customer === customer.name);
+  const request = topups.find((t) => !t.paidAt);
+
+  // A bill for an exact tab (the older flow), if one is waiting.
+  const billEntries = mine.filter((e) => e.type === "credit_sale" && e.paypalInvoiceId && !e.paidAt);
+  const bill = billEntries.length
+    ? { id: billEntries[0].paypalInvoiceId!, tzs: billEntries.reduce((s, e) => s + e.amount, 0), entries: billEntries }
+    : null;
+
+  const notice = data.notices.find((n) => n.customer === customer.name);
+  const owed = Math.max(data.balances[customer.name]?.TZS ?? 0, 0);
+  return {
+    customer,
+    usd,
+    balance: data.wallets[customer.name] ?? 0,
+    hasWallet: customer.name in data.wallets,
+    owed,
+    purchases,
+    request,
+    bill,
+    notice,
+    anySale: purchases.length > 0,
+    anyRequest: topups.length > 0 || mine.some((e) => e.paypalInvoiceId),
+    anyPaid: topups.some((t) => t.paidAt) || mine.some((e) => e.type === "payment_received"),
+    walletPaidSomething: mine.some((e) => e.type === "wallet_sale" && !e.fromCredit),
+  };
 }
 
 /* ---------------- small pieces ---------------- */
@@ -79,39 +95,63 @@ function City({ name, zone, who }: { name: string; zone: string; who: string }) 
   );
 }
 
+function PayButton({ invoiceId, usd, name }: { invoiceId: string; usd: number; name?: string }) {
+  return (
+    <>
+      <a
+        href={`https://www.sandbox.paypal.com/invoice/p/#${invoiceId}`}
+        target="_blank"
+        rel="noreferrer"
+        className="mt-3 flex h-11 items-center justify-center gap-2 rounded-full bg-[#ffc439] font-semibold text-[#111c4e] hover:brightness-95"
+      >
+        Pay ${usd.toFixed(2)} in PayPal <ExternalLink className="size-4" />
+      </a>
+      <p className="mt-2 text-center text-xs text-muted-foreground">
+        PayPal emailed this to {name ?? "the family"} too. Opens the sandbox; log in as {name ?? "the payer"}.
+      </p>
+    </>
+  );
+}
+
+function purchaseTag(e: Entry) {
+  if (e.type === "wallet_sale") return { text: "paid from wallet", cls: "text-paid" };
+  if (e.paidAt) return { text: "paid", cls: "text-paid" };
+  if (e.paypalInvoiceId) return { text: "billed", cls: "text-muted-foreground" };
+  return { text: "on credit", cls: "text-margin" };
+}
+
 /* ---------------- page ---------------- */
 
 export default function TwoCities() {
   const { data, freshPaymentAt, refresh } = useLedger();
+  const [actions, setActions] = useState<AgentAction[]>([]);
   const fam = familyView(data);
   const payer = fam?.customer.payer;
-  const inv = fam?.latest;
-  const tzs = (n: number) => `${Math.round(n).toLocaleString("en-US")} TZS`;
+  const who = payer?.name ?? "Familia";
+  const she = fam?.customer.name ?? "Mteja";
 
   const steps = [
     {
-      done: !!fam?.hasSales,
-      sw: `${fam?.customer.name ?? "Mteja"} anachukua bidhaa kwa mkopo`,
-      en: "She takes groceries on credit. The shopkeeper says it; Sauti writes it in the daftari.",
+      done: !!fam?.anySale,
+      sw: `${she} ananunua dukani`,
+      en: "She shops. The shopkeeper says it, and Sauti writes it in the daftari.",
     },
     {
-      done: !!inv,
-      sw: `Bili inaenda ${payer?.city ?? "nje ya nchi"}`,
-      en: inv
-        ? `Sauti sends ${payer?.name} a PayPal invoice: ${tzs(inv.tzs)} becomes $${inv.usd.toFixed(2)}.`
-        : `Sauti sends ${payer?.name ?? "the family"} a PayPal invoice in dollars.`,
+      done: !!fam?.anyRequest,
+      sw: `Sauti anamwomba ${who} ajaze pochi`,
+      en: `On its own, Sauti sends ${payer?.name ?? "the family"} a PayPal request to fund her grocery wallet.`,
       arrow: "→",
     },
     {
-      done: !!inv?.paid,
-      sw: `${payer?.name ?? "Familia"} analipa kwa PayPal`,
-      en: "He pays in one tap and sees exactly what it bought.",
+      done: !!fam?.anyPaid,
+      sw: `${who} analipa kwa PayPal`,
+      en: "He pays in one tap. What she owed is cleared, and the rest waits in her wallet.",
       arrow: "←",
     },
     {
-      done: !!inv?.paid,
-      sw: "Deni limefutwa",
-      en: "PayPal tells Sauti. The tab is stamped paid; the shop withdraws to M-Pesa.",
+      done: !!fam?.walletPaidSomething,
+      sw: "Pochi inalipa manunuzi",
+      en: "Her next purchases are paid on the spot. When the wallet runs low, Sauti asks again.",
     },
   ];
   const current = steps.findIndex((s) => !s.done);
@@ -122,16 +162,22 @@ export default function TwoCities() {
         <Link href="/" className="text-3xl font-extrabold tracking-tight">
           Sauti
         </Link>
-        <p className="text-sm text-ink-soft">One tab, two cities: the shop in Dar es Salaam, the family abroad</p>
+        <p className="text-sm text-ink-soft">A PayPal agent that speaks Swahili: one family wallet, two cities</p>
       </header>
 
-      <div className="mx-auto mt-6 grid max-w-[78rem] items-start justify-items-center gap-8 lg:grid-cols-[1fr_17rem_1fr]">
+      <div className="mx-auto mt-6 grid max-w-[80rem] items-start justify-items-center gap-8 lg:grid-cols-[1fr_19rem_1fr]">
         {/* Dar es Salaam: the real app */}
         <div className="w-full max-w-[24rem]">
           <City name="Dar es Salaam" zone="Africa/Dar_es_Salaam" who="Mzee Salim's shop" />
           <Phone label="The shopkeeper's phone in Dar es Salaam">
             <div className="px-4 pb-5 pt-9">
-              <TalkPanel onDone={refresh} compact />
+              <TalkPanel
+                compact
+                onDone={(reply) => {
+                  setActions(reply?.actions ?? []);
+                  refresh();
+                }}
+              />
             </div>
             <div className="min-h-[24rem] bg-paper">
               <Daftari data={data} freshPaymentAt={freshPaymentAt} compact />
@@ -140,28 +186,36 @@ export default function TwoCities() {
         </div>
 
         {/* The journey: a real sequence, lit as each step happens */}
-        <ol className="w-full max-w-[24rem] space-y-5 lg:mt-40" aria-label="How the money moves">
-          {steps.map((s, i) => (
-            <li key={i} className={"flex gap-3 transition-opacity duration-500 " + (s.done || i === current ? "opacity-100" : "opacity-45")}>
-              <span
-                className={
-                  "grid size-8 shrink-0 place-items-center rounded-full text-sm font-bold transition-colors duration-500 " +
-                  (s.done ? "bg-paid text-white" : i === current ? "bg-marigold text-ink" : "bg-ink-2 text-ink-soft")
-                }
-              >
-                {s.done ? <Check className="size-4" strokeWidth={3} /> : i + 1}
-              </span>
-              <span>
-                <span className="block font-semibold leading-snug">
-                  {s.sw} {s.arrow && <span className="text-marigold">{s.arrow}</span>}
+        <div className="w-full max-w-[24rem] lg:mt-24">
+          <ol className="space-y-5" aria-label="How the money moves">
+            {steps.map((s, i) => (
+              <li key={i} className={"flex gap-3 transition-opacity duration-500 " + (s.done || i === current ? "opacity-100" : "opacity-45")}>
+                <span
+                  className={
+                    "grid size-8 shrink-0 place-items-center rounded-full text-sm font-bold transition-colors duration-500 " +
+                    (s.done ? "bg-paid text-white" : i === current ? "bg-marigold text-ink" : "bg-ink-2 text-ink-soft")
+                  }
+                >
+                  {s.done ? <Check className="size-4" strokeWidth={3} /> : i + 1}
                 </span>
-                <span className="block text-sm leading-snug text-ink-soft">{s.en}</span>
-              </span>
-            </li>
-          ))}
-        </ol>
+                <span>
+                  <span className="block font-semibold leading-snug">
+                    {s.sw} {s.arrow && <span className="text-marigold">{s.arrow}</span>}
+                  </span>
+                  <span className="block text-sm leading-snug text-ink-soft">{s.en}</span>
+                </span>
+              </li>
+            ))}
+          </ol>
+          {/* What the agent just did, with its PayPal calls marked */}
+          {actions.length > 0 && (
+            <div className="mt-6 border-t border-ink-2 pt-1">
+              <AgentSteps actions={actions} />
+            </div>
+          )}
+        </div>
 
-        {/* The family's city: what Juma sees */}
+        {/* The family's city: the wallet, as the relative sees it */}
         <div className="w-full max-w-[24rem]">
           <City
             name={payer?.city ?? "New York"}
@@ -170,73 +224,83 @@ export default function TwoCities() {
           />
           <Phone label={`${payer?.name ?? "The family"}'s phone`} light>
             <div className="flex min-h-full flex-col px-5 pb-5 pt-10 text-foreground">
-              {!inv ? (
-                <div className="my-auto text-center">
-                  <p className="text-lg font-semibold">No bills yet</p>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    When the shop sends {payer?.name ?? "the family"} a bill for {fam?.customer.name ?? "a customer"}'s groceries, it
-                    shows up here.
+              <p className="text-lg font-bold leading-tight">{she}'s grocery wallet</p>
+              <p className="text-xs text-muted-foreground">at Duka la Mzee Salim, Dar es Salaam</p>
+
+              <div className="mt-4 rounded-xl bg-ink p-4 text-white">
+                <p className="text-xs text-ink-soft">Wallet balance</p>
+                <p className="text-3xl font-bold tabular-nums">{tzs(fam?.balance ?? 0)}</p>
+                <p className="text-sm text-ink-soft">
+                  about ${(fam?.usd(fam.balance) ?? 0).toFixed(2)}
+                  {fam && fam.owed > 0 && <span className="ml-2 text-[#ffb4ae]">and {tzs(fam.owed)} owed</span>}
+                </p>
+              </div>
+
+              {fam?.request ? (
+                <div className="mt-4 rounded-xl bg-white p-4 shadow-sm">
+                  <p className="text-sm text-muted-foreground">Sauti asks you to add</p>
+                  <p className="text-2xl font-bold tabular-nums">
+                    ${fam.request.usd.toFixed(2)}{" "}
+                    <span className="text-sm font-normal text-muted-foreground">({tzs(fam.request.amountTzs)})</span>
+                  </p>
+                  <p className="mt-1 text-sm leading-snug">
+                    {fam.balance <= 0 ? "The wallet is empty" : "The wallet is running low"}
+                    {fam.owed > 0 ? `, and ${tzs(fam.owed)} is owed. That is cleared first.` : "."}
+                  </p>
+                  <PayButton invoiceId={fam.request.invoiceId} usd={fam.request.usd} name={payer?.name} />
+                </div>
+              ) : fam?.bill ? (
+                <div className="mt-4 rounded-xl bg-white p-4 shadow-sm">
+                  <p className="text-sm text-muted-foreground">Bill for {she}'s groceries</p>
+                  <p className="text-2xl font-bold tabular-nums">
+                    ${fam.usd(fam.bill.tzs).toFixed(2)}{" "}
+                    <span className="text-sm font-normal text-muted-foreground">({tzs(fam.bill.tzs)})</span>
+                  </p>
+                  <PayButton invoiceId={fam.bill.id} usd={fam.usd(fam.bill.tzs)} name={payer?.name} />
+                </div>
+              ) : fam?.notice ? (
+                <div key={fam.notice.at} className="mt-4 rounded-xl bg-[#e8f5ec] p-4 text-paid animate-in fade-in duration-500">
+                  <p className="flex items-center gap-2 font-bold">
+                    <Check className="size-5" strokeWidth={3} />
+                    {fam.notice.kind === "topup" ? "Topped up with PayPal" : "Paid with PayPal"}
+                  </p>
+                  <p className="mt-1 text-sm text-[#2a5a3c]">
+                    ${fam.usd(fam.notice.amountTzs).toFixed(2)} went straight to the shop
+                    {fam.notice.clearedTzs ? `. ${tzs(fam.notice.clearedTzs)} she owed is cleared.` : "."}
                   </p>
                 </div>
+              ) : null}
+
+              <h3 className="mt-5 text-sm font-semibold">What it bought</h3>
+              {fam?.purchases.length ? (
+                <ul className="mt-2 divide-y rounded-xl bg-white px-4 shadow-sm">
+                  {fam.purchases.slice(0, 5).map((e) => {
+                    const tag = purchaseTag(e);
+                    return (
+                      <li key={e.id} className="flex items-baseline justify-between gap-3 py-2.5 text-sm">
+                        <span className="min-w-0">
+                          <span className="block truncate">{e.item ?? "Groceries"}</span>
+                          <span className={"block text-xs " + tag.cls}>{tag.text}</span>
+                        </span>
+                        <span className="shrink-0 font-semibold tabular-nums">{tzs(e.amount)}</span>
+                      </li>
+                    );
+                  })}
+                </ul>
               ) : (
-                <>
-                  <p className="text-xs text-muted-foreground">Invoice from</p>
-                  <p className="text-lg font-bold">Duka la Mzee Salim</p>
-                  <p className="text-xs text-muted-foreground">Dar es Salaam</p>
-
-                  <div className="mt-4 rounded-xl bg-white p-4 shadow-sm">
-                    <p className="text-sm text-muted-foreground">Groceries for {fam!.customer.name}</p>
-                    <ul className="mt-3 space-y-2.5 text-sm">
-                      {inv.entries.map((e) => (
-                        <li key={e.id} className="flex justify-between gap-3">
-                          <span className="min-w-0">
-                            <span className="block truncate">{e.item ?? "Groceries"}</span>
-                            <span className="block text-xs text-muted-foreground">{tzs(e.amount)}</span>
-                          </span>
-                          <span className="font-semibold tabular-nums">${fam!.usdOf(e).toFixed(2)}</span>
-                        </li>
-                      ))}
-                    </ul>
-                    <div className="mt-3 flex justify-between border-t pt-3 font-bold">
-                      <span>Total</span>
-                      <span className="tabular-nums">${inv.usd.toFixed(2)}</span>
-                    </div>
-                  </div>
-
-                  {inv.paid ? (
-                    <div className="mt-4 rounded-xl bg-[#e8f5ec] p-4 text-paid animate-in fade-in duration-500">
-                      <p className="flex items-center gap-2 font-bold">
-                        <Check className="size-5" strokeWidth={3} /> Paid with PayPal
-                      </p>
-                      <p className="mt-1 text-sm text-[#2a5a3c]">
-                        ${inv.usd.toFixed(2)} went straight to the shop. {fam!.customer.name}'s tab is clear.
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="mt-4">
-                      <a
-                        href={`https://www.sandbox.paypal.com/invoice/p/#${inv.id}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="flex h-11 items-center justify-center gap-2 rounded-full bg-[#ffc439] font-semibold text-[#111c4e] hover:brightness-95"
-                      >
-                        Pay ${inv.usd.toFixed(2)} in PayPal <ExternalLink className="size-4" />
-                      </a>
-                      <p className="mt-2 text-center text-xs text-muted-foreground">
-                        PayPal also emailed this invoice to {payer?.name}. Opens the sandbox; log in as {payer?.name}.
-                      </p>
-                    </div>
-                  )}
-                  <p className="mt-auto pt-6 text-center text-xs text-muted-foreground">Invoice {inv.id}</p>
-                </>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  Nothing yet. When {she} shops, each item shows up here, so {payer?.name ?? "the family"} sees exactly where the
+                  money goes.
+                </p>
               )}
+              <p className="mt-auto pt-6 text-center text-xs text-muted-foreground">Money moves with PayPal, straight to the shop</p>
             </div>
           </Phone>
         </div>
       </div>
-      <p className="mx-auto mt-8 max-w-[78rem] text-xs text-ink-soft/80">
-        Demo view on PayPal's sandbox. The left phone is the live app; the right phone shows what the family receives, updated
-        when PayPal confirms the payment.
+      <p className="mx-auto mt-8 max-w-[80rem] text-xs text-ink-soft/80">
+        Demo view on PayPal's sandbox. The left phone is the live app; the right phone shows what the family sees, updated when
+        PayPal confirms a payment.
       </p>
     </main>
   );

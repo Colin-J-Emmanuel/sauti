@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, BookOpenCheck, Eraser, FileText, Link2, Search, Send, Wallet } from "lucide-react";
+import { AlertTriangle, BellRing, BookOpenCheck, Eraser, FileText, Link2, Search, Send, Wallet } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import type { AgentAction } from "@/lib/types";
 
@@ -37,7 +37,29 @@ function describe(actions: AgentAction[]): Step[] {
       case "record_entry": {
         const cp = res?.counterparty ?? args.counterparty;
         const what = args.type === "payment_received" ? "payment" : (args.item ?? "sale");
+        if (res?.request_topup_now?.payer) lastRecipient = `${res.request_topup_now.payer.name} in ${res.request_topup_now.payer.city}`;
+        if (res?.wallet) {
+          const paid = res.paidFromWalletTzs ?? 0;
+          const credit = res.onCreditTzs ?? 0;
+          const how =
+            paid > 0 && credit > 0
+              ? `wallet paid ${tzs(paid)}, ${tzs(credit)} on credit`
+              : paid > 0
+                ? `paid from the family wallet, ${tzs(res.wallet.balanceTzs)} left`
+                : "on credit, the wallet is empty";
+          return { icon: paid > 0 ? Wallet : BookOpenCheck, text: `Wrote ${what}, ${tzs(args.amount)}, for ${cp}: ${how}`, error };
+        }
         return { icon: BookOpenCheck, text: `Wrote ${what}, ${tzs(args.amount)}, in ${cp}'s tab`, error };
+      }
+      case "get_wallet": {
+        if (res?.payer) lastRecipient = `${res.payer.name} in ${res.payer.city}`;
+        return { icon: Wallet, text: `Checked ${res?.customer ?? args.customer}'s family wallet: ${tzs(res?.balanceTzs ?? 0)}`, error };
+      }
+      case "link_topup_invoice":
+        return { icon: Link2, text: `Wallet will be credited ${tzs(args.amountTzs)} the moment PayPal confirms payment`, error };
+      case "open_invoices": {
+        const n = Array.isArray(res) ? res.length : 0;
+        return { icon: Search, text: `Checked unpaid PayPal requests: ${n} waiting`, error };
       }
       case "get_family_tab": {
         if (res?.payer) lastRecipient = `${res.payer.name} in ${res.payer.city}`;
@@ -67,12 +89,18 @@ function describe(actions: AgentAction[]): Step[] {
         if (who) lastRecipient = who;
         const id = typeof res?.href === "string" ? res.href.split("/").pop() : undefined;
         if (id) invoiceTotal[id] = total;
-        return { icon: FileText, paypal: true, text: `Created a PayPal invoice for $${total.toFixed(2)}`, error };
+        const isTopup = /wallet|pochi/i.test(JSON.stringify(args.items ?? ""));
+        return {
+          icon: FileText,
+          paypal: true,
+          text: isTopup ? `Created a PayPal top-up request for $${total.toFixed(2)}` : `Created a PayPal invoice for $${total.toFixed(2)}`,
+          error,
+        };
       }
       case "send_invoice":
-        return { icon: Send, paypal: true, text: `Sent the invoice to ${lastRecipient}`, error };
+        return { icon: Send, paypal: true, text: `Sent it to ${lastRecipient}`, error };
       case "send_invoice_reminder":
-        return { icon: Send, paypal: true, text: `Sent ${lastRecipient} a payment reminder`, error };
+        return { icon: BellRing, paypal: true, text: `Sent ${lastRecipient} a payment reminder`, error };
       case "link_invoice_to_entries": {
         const n = args.entryIds?.length ?? 0;
         return { icon: Link2, text: `Marked ${n} item${n === 1 ? "" : "s"} as billed, so they can't be billed twice`, error };

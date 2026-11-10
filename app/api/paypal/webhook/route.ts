@@ -1,11 +1,33 @@
 import { NextResponse } from "next/server";
 import { runAfterResponse, sendWhatsApp, shopNumber, whatsappEnabled } from "@/lib/whatsapp";
 import { verifyWebhook } from "@/lib/paypal";
-import { markEventProcessed, settleInvoice, unbillInvoice } from "@/lib/ledger";
+import {
+  cancelTopup,
+  markEventProcessed,
+  settleInvoice,
+  settleTopup,
+  unbillInvoice,
+  walletBalances,
+  type PaymentNotice,
+} from "@/lib/ledger";
 
 export const runtime = "nodejs";
 
 type PayPalEvent = { id: string; event_type: string; resource?: { id?: string; invoice?: { id?: string } } };
+
+const tzs = (n: number) => `${Math.round(n).toLocaleString("en-US")} TZS`;
+
+/** The WhatsApp message the shopkeeper gets when PayPal confirms a payment. */
+async function paymentMessage(n: PaymentNotice) {
+  const who = n.payer?.split(" (")[0] ?? "Familia";
+  if (n.kind === "topup") {
+    const balance = (await walletBalances())[n.customer] ?? 0;
+    const cleared = n.clearedTzs ? ` Deni la ${tzs(n.clearedTzs)} limefutwa.` : "";
+    const clearedEn = n.clearedTzs ? ` ${tzs(n.clearedTzs)} of old credit is cleared.` : "";
+    return `💸 *${who} ameweka ${tzs(n.amountTzs)}* kwenye pochi ya ${n.customer} kupitia PayPal.${cleared} Salio la pochi: ${tzs(balance)}.\n\n_EN: ${n.payer ?? "Family abroad"} added ${tzs(n.amountTzs)} to ${n.customer}'s wallet with PayPal.${clearedEn} Wallet balance: ${tzs(balance)}._`;
+  }
+  return `💸 *${who} amelipa ${tzs(n.amountTzs)}* kwa ${n.customer} kupitia PayPal. Deni limefutwa.\n\n_EN: ${n.payer ?? "Family abroad"} paid ${n.customer}'s tab with PayPal. The tab is cleared._`;
+}
 
 // "Don't poll. Let PayPal tell you." PayPal calls this when an invoice changes state.
 export async function POST(req: Request) {
@@ -21,25 +43,23 @@ export async function POST(req: Request) {
   if (!invoiceId) return NextResponse.json({ ok: true, ignored: "no invoice id" });
 
   switch (event.event_type) {
-    case "INVOICING.INVOICE.PAID":
-    {
-      const notice = await settleInvoice(invoiceId);
+    case "INVOICING.INVOICE.PAID": {
+      // A paid invoice is either a wallet top-up or a bill for a specific tab.
+      const notice = (await settleTopup(invoiceId)) ?? (await settleInvoice(invoiceId));
       // Tell the shopkeeper on WhatsApp too (after answering PayPal, so a slow message never delays the webhook).
       if (notice && whatsappEnabled()) {
         runAfterResponse(async () => {
           const to = await shopNumber();
-          if (!to) return;
-          const who = notice.payer?.split(" (")[0] ?? "Familia";
-          await sendWhatsApp(
-            to,
-            `💸 *${who} amelipa ${notice.amountTzs.toLocaleString("en-US")} TZS* kwa ${notice.customer} kupitia PayPal. Deni limefutwa.\n\n_EN: ${notice.payer ?? "Family abroad"} paid ${notice.customer}'s tab with PayPal. The tab is cleared._`,
-          );
+          if (to) await sendWhatsApp(to, await paymentMessage(notice));
         });
       }
       return NextResponse.json({ ok: true, notice });
     }
     case "INVOICING.INVOICE.CANCELLED":
-      return NextResponse.json({ ok: true, unbilled: await unbillInvoice(invoiceId) });
+      return NextResponse.json({
+        ok: true,
+        ...((await cancelTopup(invoiceId)) ? { topupCancelled: true } : { unbilled: await unbillInvoice(invoiceId) }),
+      });
     default:
       return NextResponse.json({ ok: true, ignored: event.event_type });
   }

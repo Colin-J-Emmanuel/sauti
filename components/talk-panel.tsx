@@ -9,9 +9,10 @@ import type { AgentResponse } from "@/lib/types";
 
 // Phrases a judge who doesn't speak Swahili can tap to try the full flow.
 const TRY_THESE = [
-  { sw: "Mama Asha amechukua mchele wa 15,000 na mafuta ya 8,000 kwa mkopo.", en: "Mama Asha took rice (15,000) and oil (8,000) on credit." },
-  { sw: "Mama Asha anadaiwa kiasi gani?", en: "How much does Mama Asha owe?" },
-  { sw: "Tuma bili kwa Juma.", en: "Send the bill to Juma, her son in New York." },
+  { sw: "Mama Asha amechukua mchele wa 15,000.", en: "Mama Asha took rice worth 15,000." },
+  { sw: "Mama Asha amechukua mafuta ya 8,000 na sukari ya 4,500.", en: "She took oil (8,000) and sugar (4,500)." },
+  { sw: "Pochi ya Mama Asha ina kiasi gani?", en: "How much is in Mama Asha's wallet?" },
+  { sw: "Naweza kumkopesha Mama Asha?", en: "Can I give Mama Asha credit?" },
 ];
 
 type Exchange = { said: string; spoken: boolean; reply: AgentResponse };
@@ -21,7 +22,13 @@ function splitReply(reply = "") {
   return { sw: sw.trim(), en: rest.join(" ").trim() };
 }
 
-export function TalkPanel({ onDone, compact = false }: { onDone: () => void; compact?: boolean }) {
+export function TalkPanel({
+  onDone,
+  compact = false,
+}: {
+  onDone: (reply?: AgentResponse) => void;
+  compact?: boolean;
+}) {
   const [state, setState] = useState<"idle" | "recording" | "working">("idle");
   const [seconds, setSeconds] = useState(0);
   const [text, setText] = useState("");
@@ -40,15 +47,17 @@ export function TalkPanel({ onDone, compact = false }: { onDone: () => void; com
   async function send(form: FormData, said: string, spoken: boolean) {
     setState("working");
     setPending({ said, spoken });
+    let reply: AgentResponse | undefined;
     try {
       const res = (await (await fetch("/api/agent", { method: "POST", body: form })).json()) as AgentResponse;
       setLast({ said: spoken ? (res.transcript ?? "") : said, spoken, reply: res });
+      reply = res;
     } catch {
       setLast({ said, spoken, reply: { error: "Sauti couldn't be reached. Check your connection and try again." } });
     } finally {
       setPending(null);
       setState("idle");
-      onDone();
+      onDone(reply);
     }
   }
 
@@ -160,14 +169,14 @@ export function TalkPanel({ onDone, compact = false }: { onDone: () => void; com
       {/* Conversation */}
       <div className={compact ? "mt-4" : "mt-6 min-h-24"} aria-live="polite">
         {pending && (
-          <p className="ml-auto w-fit max-w-[90%] rounded-2xl rounded-br-sm bg-ink-2 px-4 py-2.5 text-[0.95rem]">
+          <p className={"ml-auto w-fit max-w-[90%] rounded-2xl rounded-br-sm bg-ink-2 " + (compact ? "px-3 py-2 text-sm" : "px-4 py-2.5 text-[0.95rem]")}>
             {pending.spoken ? "🎙 …" : pending.said}
           </p>
         )}
         {!pending && last && (
           <>
             {last.said && (
-              <p className="ml-auto w-fit max-w-[90%] rounded-2xl rounded-br-sm bg-ink-2 px-4 py-2.5 text-[0.95rem]">
+              <p className={"ml-auto w-fit max-w-[90%] rounded-2xl rounded-br-sm bg-ink-2 " + (compact ? "px-3 py-2 text-sm" : "px-4 py-2.5 text-[0.95rem]")}>
                 {last.spoken && <Mic aria-label="Spoken" className="mr-1.5 inline size-3.5 -translate-y-px text-marigold" />}
                 {last.said}
               </p>
@@ -177,8 +186,10 @@ export function TalkPanel({ onDone, compact = false }: { onDone: () => void; com
                 <p className="text-[0.95rem] text-margin">{last.reply.error}</p>
               ) : (
                 <>
-                  <p className="text-[1.05rem] leading-snug">{reply?.sw}</p>
-                  {reply?.en && <p className="mt-2 text-sm leading-snug text-muted-foreground">{reply.en}</p>}
+                  <p className={compact ? "text-[0.92rem] leading-snug" : "text-[1.05rem] leading-snug"}>{reply?.sw}</p>
+                  {reply?.en && (
+                    <p className={"leading-snug text-muted-foreground " + (compact ? "mt-1.5 text-xs" : "mt-2 text-sm")}>{reply.en}</p>
+                  )}
                 </>
               )}
             </div>

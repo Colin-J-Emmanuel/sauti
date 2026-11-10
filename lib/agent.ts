@@ -3,6 +3,12 @@ import { PayPalAgentToolkit } from "@paypal/agent-toolkit/ai-sdk";
 import { z } from "zod";
 import { appendTurn, loadHistory } from "./history";
 import { AGENT_MODELS, languageModel, transcribeVoiceNote } from "./models";
+import {
+  openInvoices,
+  recordTabSale,
+  registerTopup,
+  walletStatus,
+} from "./ledger";
 import { activeEntries, addEntry, canonicalCustomerName, listContacts, attachInvoice, balances, unbilledTab, voidEntries } from "./ledger";
 
 const TZS_PER_USD = Number(process.env.TZS_PER_USD ?? 2500);
@@ -77,12 +83,12 @@ function shouldFallBack(err: unknown): boolean {
 const ledgerTools = {
   record_entry: tool({
     description:
-      "Save one transaction to the trader's ledger. Call once per transaction the trader mentions.",
+      "Save one transaction to the trader's ledger. Call once per transaction the trader mentions. For goods a customer takes without paying cash (credit_sale), the customer's family wallet pays automatically if it has money and the rest goes on credit; the result tells you what happened and may include request_topup_now.",
     inputSchema: z.object({
       type: z
         .enum(["credit_sale", "payment_received", "cash_sale", "expense"])
         .describe(
-          "credit_sale = customer took goods and owes money (anadaiwa / amekopa); payment_received = customer paid back; cash_sale = paid on the spot; expense = trader bought stock or paid someone",
+          "credit_sale = customer took goods without paying cash (amechukua / anadaiwa / amekopa / kwa mkopo); payment_received = customer paid back; cash_sale = paid on the spot; expense = trader bought stock or paid someone",
         ),
       counterparty: z.string().describe("Customer or supplier name as spoken, e.g. 'Mama Asha'"),
       item: z.string().optional().describe("What was sold or bought, in Swahili as spoken"),
@@ -90,8 +96,35 @@ const ledgerTools = {
       currency: z.enum(["TZS", "USD"]).describe("Default TZS unless dollars are mentioned"),
       note: z.string().optional(),
     }),
-    // Snap near-miss names from speech-to-text ("Mama Hasha") to the known customer ("Mama Asha").
-    execute: async (args) => addEntry({ ...args, counterparty: await canonicalCustomerName(args.counterparty) }),
+    execute: async (args) => {
+      // Snap near-miss names from speech-to-text ("Mama Hasha") to the known customer ("Mama Asha").
+      const counterparty = await canonicalCustomerName(args.counterparty);
+      // Goods taken on the tab: the family wallet pays if it has money; the rest goes on credit.
+      if (args.type === "credit_sale" && args.currency === "TZS")
+        return recordTabSale({ counterparty, item: args.item, amount: args.amount, note: args.note }, TZS_PER_USD);
+      return addEntry({ ...args, counterparty });
+    },
+  }),
+
+  get_wallet: tool({
+    description:
+      "A customer's family wallet (pochi ya familia): balance, what they still owe, top-up requests waiting to be paid, the relative abroad who funds it, a suggested top-up, and their payment record (how many PayPal requests the family has paid and how fast). Use for 'pochi ya X ina kiasi gani?', before asking a relative to top up, and for 'naweza kumkopesha X?' (can I give X credit?). Accepts the customer's or the relative's name.",
+    inputSchema: z.object({ customer: z.string() }),
+    execute: async ({ customer }) => walletStatus(customer, TZS_PER_USD),
+  }),
+
+  link_topup_invoice: tool({
+    description:
+      "After creating and sending a PayPal invoice that asks a relative to top up a customer's wallet, register it so the wallet is credited when PayPal confirms payment.",
+    inputSchema: z.object({ customer: z.string(), amountTzs: z.number().positive(), invoiceId: z.string() }),
+    execute: async ({ customer, amountTzs, invoiceId }) => registerTopup(customer, amountTzs, invoiceId, TZS_PER_USD),
+  }),
+
+  open_invoices: tool({
+    description:
+      "Every PayPal request still unpaid (wallet top-ups and tab bills) with invoice ids and days waiting. Use for 'nani hajalipa?' (who hasn't paid?) and to find the invoice id before sending a reminder.",
+    inputSchema: z.object({}),
+    execute: async () => openInvoices(),
   }),
 
   get_balances: tool({
@@ -132,14 +165,32 @@ const ledgerTools = {
 const SYSTEM = `You are Sauti, a bookkeeping assistant for small shopkeepers (duka owners, mama lishe, market sellers) in Tanzania.
 The trader talks to you in Swahili (sometimes mixed with English). Judges may also type in English: handle it the same way. You keep their ledger in Tanzanian shillings.
 
-Context: many customers buy on credit and their tab is paid by a relative abroad (a son in New York, a granddaughter in Houston).
-Those relatives pay with PayPal. You bill the relative directly, so diaspora money goes straight to the shop for the family's groceries
-instead of through a remittance. The trader withdraws PayPal funds to M-Pesa.
+Context: many customers' groceries are paid for by a relative abroad (a son in New York, a granddaughter in Houston) using PayPal.
+Each such customer has a family wallet (pochi ya familia): the relative puts money in through PayPal, purchases draw it down,
+and the shop is paid up front instead of carrying credit. Diaspora money goes straight to the family's groceries instead of
+through a remittance. The trader withdraws PayPal funds to M-Pesa. PayPal is how money moves here: you request it, chase it and confirm it.
 
 Rules:
-- Every sale, credit sale, payment or expense the trader mentions → call record_entry (one call per transaction).
+- Every sale, payment or expense the trader mentions → call record_entry (one call per transaction).
   The counterparty is the customer at the shop (e.g. "Mama Asha"), never the relative abroad.
-- When the trader asks to bill the family / send the bill abroad ("mtumie bili mwanawe", "tuma bili Marekani", "mdai", "tuma ankara"):
+  When a customer takes goods ("amechukua", with or without "kwa mkopo") use credit_sale: the wallet pays what it can, the rest is credit.
+  In your reply say what the wallet paid, what went on credit, and the wallet balance left.
+- Keeping the wallet funded is YOUR job. If a record_entry result contains request_topup_now, do it in the same turn without asking:
+  1. create_invoice: currency_code "USD"; recipient = request_topup_now.payer email and name; ONE line item named
+     "Pochi ya familia / Family grocery wallet – <amountTzs> TZS", quantity 1, unit amount = request_topup_now.usd.
+     invoicer_business_name: "Duka la Mzee Salim". Do not set invoice_date or due dates. note (in English, for the relative):
+     "Grocery wallet top-up for <customer> at Duka la Mzee Salim, Dar es Salaam." plus, if she owes anything,
+     "<owedTzs> TZS she already owes is cleared first; the rest pays for her next purchases." plus "Paid directly to the shop."
+  2. send_invoice with the new invoice id.
+  3. link_topup_invoice with the customer, amountTzs and invoice id.
+  Send at most ONE top-up request per customer per turn, and none if topupAlreadyRequested is true. Tell the trader you asked the relative.
+- If the trader asks you to request money for a wallet ("mwombe Juma aweke pesa", "jaza pochi"): get_wallet, then the same three steps
+  (use the amount the trader said, otherwise suggestedTopup). If payer is null, say nobody abroad is linked and stop.
+- Wallet questions ("pochi ya Mama Asha ina kiasi gani?") → get_wallet.
+- "Naweza kumkopesha X?" (can I give X credit?) → get_wallet and advise from paymentRecord and what is owed: say how many PayPal requests
+  the family has paid and how quickly. Be honest when there is no record yet.
+- "Nani hajalipa?" (who hasn't paid?) → open_invoices. To remind someone ("mkumbushe Juma") → open_invoices for the invoice id, then send_invoice_reminder.
+- The trader can still bill the exact tab instead of a top-up ("tuma bili", "mdai", "tuma ankara"):
   1. get_family_tab for that customer. If payer is null, tell the trader nobody abroad is linked to that customer and stop. If there are no entries, say the tab is clear.
   2. create_invoice: currency_code "USD"; recipient = the payer's email and name; one line item per entry,
      item name like "Mchele / Rice – 15,000 TZS (2026-11-08)", quantity 1, unit amount = its usd value.
@@ -147,7 +198,6 @@ Rules:
      "Groceries for <customer> at Duka la Mzee Salim, Dar es Salaam. Total <totalTzs> TZS. Paid directly to the shop."
   3. send_invoice with the new invoice id so the relative receives it.
   4. link_invoice_to_entries with all entryIds and the invoice id.
-- For reminders on an existing invoice, use send_invoice_reminder.
 - Never invent amounts or names. If the amount or person is unclear, ask one short question instead of guessing.
 
 - Before recording, check the conversation: if a sale was already recorded (you can see the record_entry result), do NOT record it again.
@@ -165,7 +215,7 @@ async function customersNote(): Promise<string> {
   const contacts = await listContacts();
   if (!contacts.length) return "";
   const lines = contacts.map((c) =>
-    `- ${c.name}${c.aliases.length ? ` (also: ${c.aliases.join(", ")})` : ""}${c.payer ? ` — tab paid by ${c.payer.relation} ${c.payer.name} in ${c.payer.city}` : ""}`,
+    `- ${c.name}${c.aliases.length ? ` (also: ${c.aliases.join(", ")})` : ""}${c.payer ? ` — wallet funded by ${c.payer.relation} ${c.payer.name} in ${c.payer.city}` : " — no relative abroad, pays at the shop"}`,
   );
   return `\n\nKnown customers (use these exact spellings; a voice note may mishear names, e.g. "Mama Hasha" = Mama Asha):\n${lines.join("\n")}`;
 }

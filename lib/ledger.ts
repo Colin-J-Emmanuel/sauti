@@ -6,7 +6,9 @@ export type EntryType =
   | "credit_sale" // customer took goods, owes the trader
   | "payment_received" // customer paid (cash or PayPal)
   | "cash_sale" // paid on the spot
-  | "expense"; // trader paid a supplier / bought stock
+  | "expense" // trader paid a supplier / bought stock
+  | "wallet_topup" // family abroad put money in the customer's wallet (PayPal)
+  | "wallet_sale"; // purchase paid from the customer's prepaid wallet
 
 export type LedgerEntry = {
   id: string;
@@ -19,7 +21,9 @@ export type LedgerEntry = {
   note?: string;
   transcript?: string;
   paypalInvoiceId?: string;
-  paidAt?: string; // set when the PayPal invoice covering this entry is paid
+  billedAt?: string; // when it went onto a PayPal invoice
+  paidAt?: string; // set when the PayPal invoice covering this entry is paid, or the wallet covered it
+  fromCredit?: boolean; // was a credit sale, later cleared by a wallet top-up
   voidedAt?: string; // removed by the trader (duplicate / mistake); kept for the audit trail
 };
 
@@ -101,7 +105,11 @@ export async function attachInvoice(entryIds: string[], invoiceId: string) {
   return locked(async () => {
     const entries = await listEntries();
     const updated = entries.filter((x) => entryIds.includes(x.id));
-    updated.forEach((e) => (e.paypalInvoiceId = invoiceId));
+    const now = new Date().toISOString();
+    updated.forEach((e) => {
+      e.paypalInvoiceId = invoiceId;
+      e.billedAt = now;
+    });
     await fs.writeFile(LEDGER_FILE, JSON.stringify(entries, null, 2));
     return updated;
   });
@@ -216,6 +224,8 @@ export type PaymentNotice = {
   payer?: string;
   amountTzs: number;
   at: string;
+  kind?: "bill" | "topup"; // bill = a tab was paid; topup = money went into the wallet
+  clearedTzs?: number; // for a top-up: how much old credit it cleared
 };
 
 const EVENTS_FILE = path.join(DATA_DIR, "events.json");
@@ -269,7 +279,7 @@ export async function settleInvoice(invoiceId: string): Promise<PaymentNotice | 
     });
     await fs.writeFile(LEDGER_FILE, JSON.stringify(entries, null, 2));
   
-    const notice: PaymentNotice = { invoiceId, customer, payer, amountTzs, at: now };
+    const notice: PaymentNotice = { invoiceId, customer, payer, amountTzs, at: now, kind: "bill" };
     const log = await readEvents();
     log.notices.push(notice);
     await fs.writeFile(EVENTS_FILE, JSON.stringify(log, null, 2));
@@ -286,4 +296,230 @@ export async function unbillInvoice(invoiceId: string): Promise<number> {
     await fs.writeFile(LEDGER_FILE, JSON.stringify(entries, null, 2));
     return covered.length;
   });
+}
+
+// ---------- Pochi ya familia: the prepaid family wallet ----------
+// A relative abroad funds the customer's wallet through PayPal. Purchases draw it down,
+// so the shop is paid up front instead of carrying credit. When it runs low, Sauti asks
+// the relative for a top-up (a PayPal invoice) without being told to.
+
+export const WALLET_LOW_TZS = Number(process.env.WALLET_LOW_TZS ?? 10000);
+export const WALLET_TOPUP_TZS = Number(process.env.WALLET_TOPUP_TZS ?? 50000);
+const TOPUPS_FILE = path.join(DATA_DIR, "topups.json");
+
+export type TopupRequest = {
+  invoiceId: string;
+  customer: string;
+  amountTzs: number;
+  usd: number;
+  createdAt: string;
+  paidAt?: string;
+  cancelledAt?: string;
+};
+
+export async function listTopups(): Promise<TopupRequest[]> {
+  return readJson<TopupRequest[]>(TOPUPS_FILE, []);
+}
+
+const live = (e: LedgerEntry) => !e.voidedAt && e.currency === "TZS";
+
+function walletOf(entries: LedgerEntry[], customer: string): number {
+  let bal = 0;
+  for (const e of entries) {
+    if (!live(e) || e.counterparty !== customer) continue;
+    if (e.type === "wallet_topup") bal += e.amount;
+    if (e.type === "wallet_sale") bal -= e.amount;
+  }
+  return bal;
+}
+
+const owedOf = (entries: LedgerEntry[], customer: string) =>
+  entries
+    .filter((e) => live(e) && e.counterparty === customer && e.type === "credit_sale" && !e.paypalInvoiceId && !e.paidAt)
+    .reduce((s, e) => s + e.amount, 0);
+
+export async function walletBalances(): Promise<Record<string, number>> {
+  const entries = await listEntries();
+  const out: Record<string, number> = {};
+  for (const name of new Set(entries.filter((e) => e.type === "wallet_topup" || e.type === "wallet_sale").map((e) => e.counterparty)))
+    out[name] = walletOf(entries, name);
+  return out;
+}
+
+const roundUp = (n: number, step: number) => Math.ceil(n / step) * step;
+
+/** How much to ask for: the standard top-up, or more if the customer already owes a lot. */
+function suggestTopup(owed: number, tzsPerUsd: number) {
+  const amountTzs = Math.max(WALLET_TOPUP_TZS, roundUp(owed + WALLET_LOW_TZS, 10000));
+  return { amountTzs, usd: Math.round((amountTzs / tzsPerUsd) * 100) / 100 };
+}
+
+// Two sales in one sentence are recorded in parallel; only the first should trigger a top-up request.
+const lastSuggested = new Map<string, number>();
+
+/**
+ * Record a sale on a customer's tab. If their wallet has money, the wallet pays (fully or partly);
+ * anything it can't cover goes on credit. Returns the wallet's state so the agent can act on it.
+ */
+export async function recordTabSale(
+  sale: { counterparty: string; item?: string; amount: number; note?: string },
+  tzsPerUsd: number,
+) {
+  const contact = await findContact(sale.counterparty);
+  const topups = await listTopups();
+  return locked(async () => {
+    const entries = await listEntries();
+    const now = new Date().toISOString();
+    const bal = walletOf(entries, sale.counterparty);
+    const fromWallet = Math.min(Math.max(bal, 0), sale.amount);
+    const onCredit = sale.amount - fromWallet;
+    const made: LedgerEntry[] = [];
+    const base = { counterparty: sale.counterparty, item: sale.item, currency: "TZS" as const, note: sale.note };
+    if (fromWallet > 0) made.push({ ...base, id: randomUUID(), createdAt: now, type: "wallet_sale", amount: fromWallet, paidAt: now });
+    if (onCredit > 0) made.push({ ...base, id: randomUUID(), createdAt: now, type: "credit_sale", amount: onCredit });
+    entries.push(...made);
+    await fs.mkdir(DATA_DIR, { recursive: true });
+    await fs.writeFile(LEDGER_FILE, JSON.stringify(entries, null, 2));
+
+    const balanceAfter = walletOf(entries, sale.counterparty);
+    const owed = owedOf(entries, sale.counterparty);
+    const pending = topups.some((t) => t.customer === sale.counterparty && !t.paidAt && !t.cancelledAt);
+    const low = !!contact?.payer && balanceAfter < WALLET_LOW_TZS;
+    const recently = Date.now() - (lastSuggested.get(sale.counterparty) ?? 0) < 20000;
+    const shouldRequest = low && !pending && !recently;
+    if (shouldRequest) lastSuggested.set(sale.counterparty, Date.now());
+
+    return {
+      recorded: made.map((e) => ({ entryId: e.id, type: e.type, item: e.item, amount: e.amount })),
+      paidFromWalletTzs: fromWallet,
+      onCreditTzs: onCredit,
+      wallet: { balanceTzs: balanceAfter, owedTzs: owed, low, topupAlreadyRequested: pending || (low && recently && !shouldRequest) },
+      ...(shouldRequest
+        ? {
+            request_topup_now: {
+              why: balanceAfter <= 0 ? "wallet is empty" : "wallet is running low",
+              ...suggestTopup(owed, tzsPerUsd),
+              payer: contact!.payer,
+            },
+          }
+        : {}),
+    };
+  });
+}
+
+/** Everything about one customer's wallet, including whether they've been reliable payers. */
+export async function walletStatus(customer: string, tzsPerUsd: number) {
+  const contact = await findContact(customer);
+  const name = contact?.name ?? customer;
+  const entries = await listEntries();
+  const topups = (await listTopups()).filter((t) => t.customer === name);
+  const owed = owedOf(entries, name);
+
+  // Payment record: how quickly the family has paid PayPal requests so far.
+  const hours: number[] = topups.filter((t) => t.paidAt).map((t) => (Date.parse(t.paidAt!) - Date.parse(t.createdAt)) / 36e5);
+  const bills = new Map<string, LedgerEntry>();
+  for (const e of entries)
+    if (live(e) && e.counterparty === name && e.type === "credit_sale" && e.paypalInvoiceId && e.paidAt && e.billedAt)
+      bills.set(e.paypalInvoiceId, e);
+  for (const e of bills.values()) hours.push((Date.parse(e.paidAt!) - Date.parse(e.billedAt!)) / 36e5);
+
+  return {
+    customer: name,
+    payer: contact?.payer ?? null,
+    balanceTzs: walletOf(entries, name),
+    owedTzs: owed,
+    lowBelowTzs: WALLET_LOW_TZS,
+    pendingTopups: topups.filter((t) => !t.paidAt && !t.cancelledAt),
+    suggestedTopup: suggestTopup(owed, tzsPerUsd),
+    paymentRecord: {
+      paypalRequestsPaid: hours.length,
+      averageHoursToPay: hours.length ? Math.round((hours.reduce((a, b) => a + b, 0) / hours.length) * 10) / 10 : null,
+      unpaidRequests: topups.filter((t) => !t.paidAt && !t.cancelledAt).length,
+    },
+  };
+}
+
+export async function registerTopup(customer: string, amountTzs: number, invoiceId: string, tzsPerUsd: number) {
+  const name = (await findContact(customer))?.name ?? customer;
+  return locked(async () => {
+    const topups = await listTopups();
+    if (topups.some((t) => t.invoiceId === invoiceId)) return { ok: true, alreadyLinked: true };
+    lastSuggested.delete(name); // from here the pending request itself prevents duplicates
+    topups.push({ invoiceId, customer: name, amountTzs, usd: Math.round((amountTzs / tzsPerUsd) * 100) / 100, createdAt: new Date().toISOString() });
+    await fs.mkdir(DATA_DIR, { recursive: true });
+    await fs.writeFile(TOPUPS_FILE, JSON.stringify(topups, null, 2));
+    return { ok: true, customer: name, amountTzs, invoiceId };
+  });
+}
+
+/** Top-up invoice paid → money lands in the wallet, and clears any old credit first. */
+export async function settleTopup(invoiceId: string): Promise<PaymentNotice | null> {
+  return locked(async () => {
+    const topups = await listTopups();
+    const t = topups.find((x) => x.invoiceId === invoiceId && !x.paidAt && !x.cancelledAt);
+    if (!t) return null;
+    const now = new Date().toISOString();
+    t.paidAt = now;
+
+    const contact = await findContact(t.customer);
+    const payer = contact?.payer ? `${contact.payer.name} (${contact.payer.city})` : undefined;
+    const entries = await listEntries();
+    entries.push({
+      id: randomUUID(), createdAt: now, type: "wallet_topup", counterparty: t.customer, amount: t.amountTzs,
+      currency: "TZS", note: `Wallet topped up via PayPal${payer ? ` by ${payer}` : ""}`, paypalInvoiceId: invoiceId, paidAt: now,
+    });
+
+    // Oldest unbilled credit is cleared from the fresh balance.
+    let bal = walletOf(entries, t.customer);
+    let cleared = 0;
+    for (const e of entries) {
+      if (!live(e) || e.counterparty !== t.customer || e.type !== "credit_sale" || e.paypalInvoiceId || e.paidAt) continue;
+      if (e.amount > bal) continue;
+      e.type = "wallet_sale";
+      e.fromCredit = true;
+      e.paidAt = now;
+      bal -= e.amount;
+      cleared += e.amount;
+    }
+    await fs.writeFile(LEDGER_FILE, JSON.stringify(entries, null, 2));
+    await fs.writeFile(TOPUPS_FILE, JSON.stringify(topups, null, 2));
+
+    const notice: PaymentNotice = { invoiceId, customer: t.customer, payer, amountTzs: t.amountTzs, at: now, kind: "topup", clearedTzs: cleared };
+    const log = await readEvents();
+    log.notices.push(notice);
+    await fs.writeFile(EVENTS_FILE, JSON.stringify(log, null, 2));
+    return notice;
+  });
+}
+
+export async function cancelTopup(invoiceId: string): Promise<boolean> {
+  return locked(async () => {
+    const topups = await listTopups();
+    const t = topups.find((x) => x.invoiceId === invoiceId && !x.paidAt && !x.cancelledAt);
+    if (!t) return false;
+    t.cancelledAt = new Date().toISOString();
+    await fs.writeFile(TOPUPS_FILE, JSON.stringify(topups, null, 2));
+    return true;
+  });
+}
+
+/** Every PayPal request still waiting to be paid: wallet top-ups and tab bills. */
+export async function openInvoices() {
+  const entries = await listEntries();
+  const contacts = await listContacts();
+  const payerOf = (c: string) => contacts.find((x) => x.name === c)?.payer?.name ?? null;
+  const days = (iso: string) => Math.round(((Date.now() - Date.parse(iso)) / 864e5) * 10) / 10;
+  const out = (await listTopups())
+    .filter((t) => !t.paidAt && !t.cancelledAt)
+    .map((t) => ({ invoiceId: t.invoiceId, kind: "wallet top-up", customer: t.customer, payer: payerOf(t.customer), amountTzs: t.amountTzs, daysWaiting: days(t.createdAt) }));
+  const bills = new Map<string, { customer: string; amountTzs: number; at: string }>();
+  for (const e of entries) {
+    if (!live(e) || e.type !== "credit_sale" || !e.paypalInvoiceId || e.paidAt) continue;
+    const b = bills.get(e.paypalInvoiceId) ?? { customer: e.counterparty, amountTzs: 0, at: e.billedAt ?? e.createdAt };
+    b.amountTzs += e.amount;
+    bills.set(e.paypalInvoiceId, b);
+  }
+  for (const [invoiceId, b] of bills)
+    out.push({ invoiceId, kind: "tab bill", customer: b.customer, payer: payerOf(b.customer), amountTzs: b.amountTzs, daysWaiting: days(b.at) });
+  return out;
 }

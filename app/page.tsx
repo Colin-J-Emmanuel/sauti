@@ -19,7 +19,7 @@ export default function Home() {
             Dar es Salaam
           </p>
         </header>
-        <TalkPanel onDone={refresh} />
+        <TalkPanel onDone={() => refresh()} />
         <p className="mt-10 text-xs leading-relaxed text-ink-soft/80">
           Demo running on PayPal's sandbox: invoices and payments are test money. Amounts are kept in shillings and
           invoiced in US dollars at {data?.tzsPerUsd ?? 2500} TZS to $1.{" "}

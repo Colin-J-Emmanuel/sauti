@@ -1,4 +1,4 @@
-// Smoke test: Swahili text in → ledger entries + a real sandbox PayPal invoice to the relative abroad.
+// Smoke test: Swahili text in → ledger entry + a real sandbox PayPal top-up request to the relative abroad.
 // Usage:
 //   npm run test:agent                       (runs the full demo sequence)
 //   npm run test:agent -- "Baraka amelipa 5,000"
@@ -14,10 +14,10 @@ const custom = process.argv.slice(2).join(" ");
 const turns = custom
   ? [custom]
   : [
-      "Mama Asha amechukua mchele kilo tano wa shilingi 15,000 na mafuta ya 8,000 kwa mkopo.",
-      "Pia amechukua sukari ya 4,500.",
-      "Mama Asha anadaiwa kiasi gani?",
-      "Sawa, tuma bili kwa mwanawe Marekani.",
+      "Mama Asha amechukua mchele wa shilingi 15,000.",
+      "Pochi ya Mama Asha ina kiasi gani?",
+      "Nani hajalipa?",
+      "Naweza kumkopesha Mama Asha?",
     ];
 
 async function main() {

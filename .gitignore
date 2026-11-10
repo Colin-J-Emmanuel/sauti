@@ -8,3 +8,4 @@ next-env.d.ts
 data/events.json
 data/history.json
 data/whatsapp.json
+data/topups.json

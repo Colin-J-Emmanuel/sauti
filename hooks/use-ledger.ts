@@ -6,12 +6,19 @@ import type { LedgerData, Notice } from "@/lib/types";
 
 function announce(n: Notice) {
   const who = n.payer?.split(" (")[0] ?? "Familia";
-  toast.success(`${who} amelipa ${n.amountTzs.toLocaleString("en-US")} TZS`, {
-    description: `${n.payer ?? "Family abroad"} paid ${n.customer}'s tab with PayPal.`,
+  const topup = n.kind === "topup";
+  toast.success(`${who} ${topup ? "ameweka" : "amelipa"} ${n.amountTzs.toLocaleString("en-US")} TZS`, {
+    description: topup
+      ? `${n.payer ?? "Family abroad"} topped up ${n.customer}'s wallet with PayPal.`
+      : `${n.payer ?? "Family abroad"} paid ${n.customer}'s tab with PayPal.`,
     duration: 8000,
   });
   try {
-    const u = new SpeechSynthesisUtterance(`${who} amelipa shilingi ${n.amountTzs} kwa ${n.customer}`);
+    const u = new SpeechSynthesisUtterance(
+      topup
+        ? `${who} ameweka shilingi ${n.amountTzs} kwenye pochi ya ${n.customer}`
+        : `${who} amelipa shilingi ${n.amountTzs} kwa ${n.customer}`,
+    );
     u.lang = "sw-TZ";
     speechSynthesis.speak(u);
   } catch {
