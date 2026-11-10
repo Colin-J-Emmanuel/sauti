@@ -39,7 +39,21 @@ function paypalTools() {
     wrapped[name] = tool({
       description: legacy.description,
       inputSchema: legacy.parameters,
-      execute: async (input: unknown) => legacy.execute(input, {}),
+      execute: async (input: unknown) => {
+        // Never set an invoice date: PayPal's sandbox runs on US time, so "today" in Dar es Salaam
+        // can be "tomorrow" for PayPal, which turns the invoice into an unpayable *scheduled* one.
+        // Leaving the date out makes PayPal use its own today, so the invoice is payable at once.
+        if (name === "create_invoice" && input && typeof input === "object") {
+          const { invoice_date: _drop, ...rest } = input as Record<string, unknown>;
+          const detail = rest.detail as Record<string, unknown> | undefined;
+          if (detail && typeof detail === "object") {
+            const { invoice_date: _d, ...detailRest } = detail;
+            rest.detail = detailRest;
+          }
+          input = rest;
+        }
+        return legacy.execute(input, {});
+      },
     });
   }
   return wrapped;
@@ -129,7 +143,7 @@ Rules:
   1. get_family_tab for that customer. If payer is null, tell the trader nobody abroad is linked to that customer and stop. If there are no entries, say the tab is clear.
   2. create_invoice: currency_code "USD"; recipient = the payer's email and name; one line item per entry,
      item name like "Mchele / Rice – 15,000 TZS (2026-11-08)", quantity 1, unit amount = its usd value.
-     invoicer_business_name: "Duka la Mzee Salim". note (in English, for the relative):
+     invoicer_business_name: "Duka la Mzee Salim". Do not set invoice_date or due dates. note (in English, for the relative):
      "Groceries for <customer> at Duka la Mzee Salim, Dar es Salaam. Total <totalTzs> TZS. Paid directly to the shop."
   3. send_invoice with the new invoice id so the relative receives it.
   4. link_invoice_to_entries with all entryIds and the invoice id.
