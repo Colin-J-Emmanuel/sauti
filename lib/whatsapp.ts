@@ -3,48 +3,54 @@ import { promises as fs } from "fs";
 import path from "path";
 import { after } from "next/server";
 
-// WhatsApp via the Twilio WhatsApp Sandbox.
-//   TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN  — from the Twilio Console
-//   TWILIO_WHATSAPP_FROM                   — whatsapp:+14155238886 (the sandbox number)
-//   SHOP_WHATSAPP_TO (optional)            — whatsapp:+1…  the shopkeeper; defaults to whoever last messaged Sauti
+// WhatsApp via Meta's WhatsApp Cloud API (free test number, up to 5 verified recipients).
+//   WHATSAPP_TOKEN            — access token (temporary 24h one from API Setup, or a System User token)
+//   WHATSAPP_PHONE_NUMBER_ID  — the test number's Phone Number ID (not the WABA ID)
+//   WHATSAPP_VERIFY_TOKEN     — any string you choose; typed into Meta's webhook settings too
+//   WHATSAPP_APP_SECRET       — App settings → Basic → App secret; used to check Meta's signature
+//   WHATSAPP_GRAPH_VERSION    — optional, default v25.0
+//   SHOP_WHATSAPP_TO          — optional; the shopkeeper's number. Defaults to whoever last messaged Sauti.
 
-const SID = () => process.env.TWILIO_ACCOUNT_SID ?? "";
-const TOKEN = () => process.env.TWILIO_AUTH_TOKEN ?? "";
-export const whatsappEnabled = () => !!(SID() && TOKEN() && process.env.TWILIO_WHATSAPP_FROM);
+const TOKEN = () => process.env.WHATSAPP_TOKEN ?? "";
+const PHONE_ID = () => process.env.WHATSAPP_PHONE_NUMBER_ID ?? "";
+const GRAPH = () => `https://graph.facebook.com/${process.env.WHATSAPP_GRAPH_VERSION ?? "v25.0"}`;
 
-/**
- * Twilio signs every webhook: base64(HMAC-SHA1(authToken, fullUrl + sorted key/value pairs)).
- * Checking it means only real WhatsApp messages can write in the daftari.
- */
-export function verifyTwilioSignature(url: string, params: Record<string, string>, signature: string | null): boolean {
-  if (process.env.SKIP_TWILIO_VERIFY === "true") return true; // local curl testing only
-  if (!signature || !TOKEN()) return false;
-  const data = url + Object.keys(params).sort().map((k) => k + params[k]).join("");
-  const expected = createHmac("sha1", TOKEN()).update(Buffer.from(data, "utf8")).digest("base64");
+export const whatsappEnabled = () => !!(TOKEN() && PHONE_ID());
+
+/** Meta signs every webhook body: X-Hub-Signature-256 = "sha256=" + HMAC-SHA256(appSecret, rawBody). */
+export function verifyMetaSignature(rawBody: string, header: string | null): boolean {
+  if (process.env.SKIP_WHATSAPP_VERIFY === "true") return true; // local testing only
+  const secret = process.env.WHATSAPP_APP_SECRET;
+  if (!secret || !header?.startsWith("sha256=")) return false;
+  const expected = "sha256=" + createHmac("sha256", secret).update(rawBody, "utf8").digest("hex");
   const a = Buffer.from(expected);
-  const b = Buffer.from(signature);
+  const b = Buffer.from(header);
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-/** Voice notes arrive as a Twilio media URL; downloading needs the account credentials. */
-export async function downloadMedia(url: string): Promise<{ data: Uint8Array; mimeType: string }> {
-  const res = await fetch(url, {
-    headers: { Authorization: "Basic " + Buffer.from(`${SID()}:${TOKEN()}`).toString("base64") },
-    redirect: "follow",
-  });
-  if (!res.ok) throw new Error(`Couldn't download the voice note (${res.status})`);
-  return { data: new Uint8Array(await res.arrayBuffer()), mimeType: res.headers.get("content-type") ?? "audio/ogg" };
+/** Voice notes arrive as a media id: look up its URL, then download it (both need the token). */
+export async function downloadMedia(mediaId: string): Promise<{ data: Uint8Array; mimeType: string }> {
+  const auth = { Authorization: `Bearer ${TOKEN()}` };
+  const meta = await fetch(`${GRAPH()}/${mediaId}`, { headers: auth });
+  if (!meta.ok) throw new Error(`Couldn't find the voice note (${meta.status}): ${await meta.text()}`);
+  const { url, mime_type } = (await meta.json()) as { url: string; mime_type?: string };
+  const file = await fetch(url, { headers: auth });
+  if (!file.ok) throw new Error(`Couldn't download the voice note (${file.status})`);
+  return { data: new Uint8Array(await file.arrayBuffer()), mimeType: mime_type ?? "audio/ogg" };
 }
 
-/** Send a WhatsApp message. Free-form text is allowed within 24h of the shopkeeper's last message. */
+/** Send a WhatsApp text. Free-form text works within 24h of the shopkeeper's last message. */
 export async function sendWhatsApp(to: string, body: string) {
-  const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${SID()}/Messages.json`, {
+  const res = await fetch(`${GRAPH()}/${PHONE_ID()}/messages`, {
     method: "POST",
-    headers: {
-      Authorization: "Basic " + Buffer.from(`${SID()}:${TOKEN()}`).toString("base64"),
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: new URLSearchParams({ From: process.env.TWILIO_WHATSAPP_FROM!, To: to, Body: body.slice(0, 1550) }),
+    headers: { Authorization: `Bearer ${TOKEN()}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to: to.replace(/^\+/, ""),
+      type: "text",
+      text: { preview_url: false, body: body.slice(0, 4000) },
+    }),
   });
   if (!res.ok) console.error("[whatsapp] send failed", res.status, await res.text());
 }

@@ -18,11 +18,13 @@ services:
         sync: false
       - key: PAYPAL_WEBHOOK_ID
         sync: false
-      - key: TWILIO_ACCOUNT_SID
+      - key: WHATSAPP_TOKEN
         sync: false
-      - key: TWILIO_AUTH_TOKEN
+      - key: WHATSAPP_PHONE_NUMBER_ID
         sync: false
-      - key: TWILIO_WHATSAPP_FROM
-        value: "whatsapp:+14155238886"
+      - key: WHATSAPP_VERIFY_TOKEN
+        sync: false
+      - key: WHATSAPP_APP_SECRET
+        sync: false
       - key: TZS_PER_USD
         value: "2500"

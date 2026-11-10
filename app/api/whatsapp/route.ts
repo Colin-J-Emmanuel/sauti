@@ -1,65 +1,88 @@
+import { NextResponse } from "next/server";
 import { runAgent } from "@/lib/agent";
-import { downloadMedia, formatReply, rememberShop, runAfterResponse, sendWhatsApp, verifyTwilioSignature } from "@/lib/whatsapp";
+import { markEventProcessed } from "@/lib/ledger";
+import {
+  downloadMedia,
+  formatReply,
+  rememberShop,
+  runAfterResponse,
+  sendWhatsApp,
+  verifyMetaSignature,
+} from "@/lib/whatsapp";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-const twiml = (message?: string) =>
-  new Response(
-    `<?xml version="1.0" encoding="UTF-8"?><Response>${message ? `<Message>${message}</Message>` : ""}</Response>`,
-    { headers: { "Content-Type": "text/xml" } },
-  );
-
-/** The exact public URL Twilio called (Render sits behind a proxy), needed to check the signature. */
-function publicUrl(req: Request) {
-  if (process.env.TWILIO_WEBHOOK_URL) return process.env.TWILIO_WEBHOOK_URL;
-  const u = new URL(req.url);
-  const proto = req.headers.get("x-forwarded-proto") ?? u.protocol.replace(":", "");
-  const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? u.host;
-  return `${proto}://${host}${u.pathname}${u.search}`;
+// Meta checks the webhook once when you save it: echo hub.challenge if the verify token matches.
+export async function GET(req: Request) {
+  const q = new URL(req.url).searchParams;
+  const ok =
+    q.get("hub.mode") === "subscribe" &&
+    !!process.env.WHATSAPP_VERIFY_TOKEN &&
+    q.get("hub.verify_token") === process.env.WHATSAPP_VERIFY_TOKEN;
+  return ok ? new Response(q.get("hub.challenge") ?? "", { status: 200 }) : new Response("forbidden", { status: 403 });
 }
 
-// Twilio calls this for every WhatsApp message sent to the sandbox number.
+type WaMessage = {
+  id: string;
+  from: string; // e.g. "19175550123" (no +)
+  type: "text" | "audio" | string;
+  text?: { body: string };
+  audio?: { id: string; mime_type?: string; voice?: boolean };
+};
+
+// Meta calls this for every message (and delivery/read statuses, which we ignore).
 export async function POST(req: Request) {
-  const form = await req.formData();
-  const params: Record<string, string> = {};
-  form.forEach((v, k) => (params[k] = String(v)));
-
-  if (!verifyTwilioSignature(publicUrl(req), params, req.headers.get("x-twilio-signature"))) {
-    return new Response("invalid signature", { status: 403 });
+  const raw = await req.text();
+  if (!verifyMetaSignature(raw, req.headers.get("x-hub-signature-256"))) {
+    return new Response("invalid signature", { status: 401 });
   }
 
-  const from = params.From; // e.g. whatsapp:+1917…
-  const text = (params.Body ?? "").trim();
-  const isAudio = Number(params.NumMedia ?? 0) > 0 && (params.MediaContentType0 ?? "").startsWith("audio/");
-
-  if (!from || (!text && !isAudio)) {
-    return twiml("Tuma ujumbe wa sauti au maandishi. / Send a voice note or a text message.");
+  let body: any;
+  try {
+    body = JSON.parse(raw);
+  } catch {
+    return NextResponse.json({ ok: true, ignored: "not json" });
   }
 
-  // WhatsApp gives a webhook ~15 seconds; billing through PayPal can take longer.
-  // So: answer Twilio right away, do the work after the response, and reply with a new message.
-  runAfterResponse(async () => {
-    try {
-      await rememberShop(from);
-      const result = isAudio
-        ? await (async () => {
-            const media = await downloadMedia(params.MediaUrl0);
-            return runAgent({ kind: "audio", data: media.data, mimeType: media.mimeType });
-          })()
-        : await runAgent({ kind: "text", text });
-      await sendWhatsApp(from, formatReply(result.reply, result.transcript));
-    } catch (err) {
-      console.error("[whatsapp]", err);
-      await sendWhatsApp(
-        from,
-        "Samahani, kuna tatizo. Jaribu tena baada ya muda mfupi.\n\n_EN: Something went wrong on Sauti's side. Try again in a moment._",
-      );
-    }
-  });
+  const messages: WaMessage[] = (body?.entry ?? []).flatMap((e: any) =>
+    (e?.changes ?? []).flatMap((c: any) => c?.value?.messages ?? []),
+  );
 
-  // A quick "on it" for voice notes, since transcribing adds a few seconds.
-  // Costs one message each; set WHATSAPP_ACK=false to save trial messages.
-  const ack = isAudio && process.env.WHATSAPP_ACK !== "false";
-  return twiml(ack ? "⏳ Nimesikia, naandika… / Got it, writing it down…" : undefined);
+  for (const msg of messages) {
+    // Meta retries webhooks; handle each message once.
+    if (!(await markEventProcessed(`wa:${msg.id}`))) continue;
+
+    const isAudio = msg.type === "audio" && !!msg.audio?.id;
+    const text = msg.type === "text" ? (msg.text?.body ?? "").trim() : "";
+
+    // WhatsApp expects a quick 200; billing through PayPal can take longer. Reply with a new message afterwards.
+    runAfterResponse(async () => {
+      try {
+        await rememberShop(msg.from);
+        if (!isAudio && !text) {
+          await sendWhatsApp(msg.from, "Tuma ujumbe wa sauti au maandishi.\n\n_EN: Send a voice note or a text message._");
+          return;
+        }
+        if (isAudio && process.env.WHATSAPP_ACK !== "false") {
+          await sendWhatsApp(msg.from, "⏳ Nimesikia, naandika…\n_EN: Got it, writing it down…_");
+        }
+        const result = isAudio
+          ? await (async () => {
+              const media = await downloadMedia(msg.audio!.id);
+              return runAgent({ kind: "audio", data: media.data, mimeType: media.mimeType });
+            })()
+          : await runAgent({ kind: "text", text });
+        await sendWhatsApp(msg.from, formatReply(result.reply, result.transcript));
+      } catch (err) {
+        console.error("[whatsapp]", err);
+        await sendWhatsApp(
+          msg.from,
+          "Samahani, kuna tatizo. Jaribu tena baada ya muda mfupi.\n\n_EN: Something went wrong on Sauti's side. Try again in a moment._",
+        );
+      }
+    });
+  }
+
+  return NextResponse.json({ ok: true });
 }
