@@ -35,9 +35,20 @@ export type LedgerData = {
   notices: Notice[];
   customers: Customer[];
   activity: Activity | null;
+  whatsapp: ChatMessage[];
   tzsPerUsd: number;
 };
 
 export type AgentAction = { tool: string; args: any; result: any };
 export type Activity = { at: string; source: "app" | "whatsapp"; said: string; spoken: boolean; reply: string; actions: AgentAction[] };
 export type AgentResponse = { reply?: string; actions?: AgentAction[]; transcript?: string; error?: string };
+
+export type ChatMessage = {
+  id: string;
+  at: string;
+  from: "shop" | "sauti";
+  kind: "text" | "voice" | "ack" | "reply" | "alert";
+  text?: string;
+  transcript?: string;
+  audio?: string;
+};

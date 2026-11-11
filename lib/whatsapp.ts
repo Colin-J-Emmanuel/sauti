@@ -2,6 +2,7 @@ import { createHmac, timingSafeEqual } from "crypto";
 import { promises as fs } from "fs";
 import path from "path";
 import { after } from "next/server";
+import { logChat, type ChatMessage } from "./chatlog";
 
 // WhatsApp via Meta's WhatsApp Cloud API (free test number, up to 5 verified recipients).
 //   WHATSAPP_TOKEN            — access token (temporary 24h one from API Setup, or a System User token)
@@ -40,7 +41,7 @@ export async function downloadMedia(mediaId: string): Promise<{ data: Uint8Array
 }
 
 /** Send a WhatsApp text. Free-form text works within 24h of the shopkeeper's last message. */
-export async function sendWhatsApp(to: string, body: string) {
+export async function sendWhatsApp(to: string, body: string, kind: ChatMessage["kind"] = "reply") {
   const res = await fetch(`${GRAPH()}/${PHONE_ID()}/messages`, {
     method: "POST",
     headers: { Authorization: `Bearer ${TOKEN()}`, "Content-Type": "application/json" },
@@ -53,6 +54,8 @@ export async function sendWhatsApp(to: string, body: string) {
     }),
   });
   if (!res.ok) console.error("[whatsapp] send failed", res.status, await res.text());
+  // Mirror it on the demo screen (even if delivery failed, it shows what Sauti said).
+  await logChat({ from: "sauti", kind, text: body }).catch(() => undefined);
 }
 
 // Remember who the shopkeeper is, so a PayPal payment can be announced back to them on WhatsApp.

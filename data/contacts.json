@@ -5,7 +5,7 @@
     "payer": {
       "name": "Juma",
       "relation": "son",
-      "email": "sb-befrw53775426@personal.example.com",
+      "email": "REPLACE_WITH_SANDBOX_PERSONAL_EMAIL",
       "city": "New York"
     }
   },
@@ -15,7 +15,7 @@
     "payer": {
       "name": "Neema",
       "relation": "granddaughter",
-      "email": "sb-befrw53775426@personal.example.com",
+      "email": "REPLACE_WITH_SANDBOX_PERSONAL_EMAIL",
       "city": "Houston"
     }
   },

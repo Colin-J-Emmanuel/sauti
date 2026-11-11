@@ -20,6 +20,6 @@ export function notifyShop(n: PaymentNotice) {
   if (!whatsappEnabled()) return;
   runAfterResponse(async () => {
     const to = await shopNumber();
-    if (to) await sendWhatsApp(to, await paymentMessage(n));
+    if (to) await sendWhatsApp(to, await paymentMessage(n), "alert");
   });
 }

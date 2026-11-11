@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { lastActivity } from "@/lib/activity";
+import { chatMessages } from "@/lib/chatlog";
 import { maybeSyncWithPayPal } from "@/lib/paypal-sync";
 import {
   activeEntries,
@@ -25,6 +26,7 @@ export async function GET() {
     walletLowTzs: WALLET_LOW_TZS,
     notices: await latestNotices(),
     activity: await lastActivity(),
+    whatsapp: await chatMessages(),
     // Names and who pays each tab. Emails stay on the server.
     customers: contacts.map((c) => ({
       name: c.name,

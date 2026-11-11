@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Check, ExternalLink, MessageCircle } from "lucide-react";
 import { TalkPanel } from "@/components/talk-panel";
 import { Daftari } from "@/components/daftari";
 import { AgentSteps } from "@/components/agent-steps";
+import { WhatsAppThread } from "@/components/whatsapp-thread";
 import { useLedger } from "@/hooks/use-ledger";
 import type { Entry, LedgerData } from "@/lib/types";
 
@@ -125,6 +126,29 @@ function purchaseTag(e: Entry) {
 export default function TwoCities() {
   const { data, freshPaymentAt, refresh } = useLedger();
   const [localAt, setLocalAt] = useState<string>("");
+  const [tab, setTab] = useState<"app" | "whatsapp">("app");
+  const chat = data?.whatsapp ?? [];
+  // When a new WhatsApp message comes in from the shopkeeper's phone, show it.
+  const seenChat = useRef<number | null>(null);
+  const [unread, setUnread] = useState(0);
+  useEffect(() => {
+    if (!data) return;
+    const n = chat.length;
+    if (seenChat.current === null) {
+      seenChat.current = n;
+      return;
+    }
+    if (n > seenChat.current) {
+      const fromShop = chat.slice(seenChat.current).some((m) => m.from === "shop");
+      if (fromShop) setTab("whatsapp");
+      else if (tab !== "whatsapp") setUnread((u) => u + (n - seenChat.current!));
+    }
+    seenChat.current = n;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, chat.length]);
+  useEffect(() => {
+    if (tab === "whatsapp") setUnread(0);
+  }, [tab]);
   const activity = data?.activity ?? null;
   const fam = familyView(data);
   const payer = fam?.customer.payer;
@@ -172,13 +196,44 @@ export default function TwoCities() {
           <City name="Dar es Salaam" zone="Africa/Dar_es_Salaam" who="Mzee Salim's shop" />
           <Phone label="The shopkeeper's phone in Dar es Salaam">
             <div className="px-4 pb-5 pt-9">
-              <TalkPanel
-                compact
-                onDone={() => {
-                  setLocalAt(new Date().toISOString());
-                  refresh();
-                }}
-              />
+              <div role="tablist" aria-label="How the shopkeeper talks to Sauti" className="mb-3 grid grid-cols-2 rounded-full bg-ink-2/70 p-1 text-sm">
+                {(["app", "whatsapp"] as const).map((t) => (
+                  <button
+                    key={t}
+                    role="tab"
+                    aria-selected={tab === t}
+                    onClick={() => setTab(t)}
+                    className={
+                      "flex items-center justify-center gap-1.5 rounded-full py-1.5 font-semibold transition-colors " +
+                      (tab === t ? "bg-white text-ink" : "text-ink-soft hover:text-white")
+                    }
+                  >
+                    {t === "app" ? (
+                      "Sauti app"
+                    ) : (
+                      <>
+                        <MessageCircle aria-hidden className={"size-4 " + (tab === t ? "text-[#1f9d55]" : "")} /> WhatsApp
+                        {unread > 0 && tab !== t && (
+                          <span className="grid size-5 place-items-center rounded-full bg-marigold text-[0.7rem] text-ink">{unread}</span>
+                        )}
+                      </>
+                    )}
+                  </button>
+                ))}
+              </div>
+              {/* Both stay mounted so switching tabs never loses a recording or a reply. */}
+              <div hidden={tab !== "app"}>
+                <TalkPanel
+                  compact
+                  onDone={() => {
+                    setLocalAt(new Date().toISOString());
+                    refresh();
+                  }}
+                />
+              </div>
+              <div hidden={tab !== "whatsapp"}>
+                <WhatsAppThread messages={chat} />
+              </div>
             </div>
             <div className="min-h-[24rem] bg-paper">
               <Daftari data={data} freshPaymentAt={freshPaymentAt} compact />

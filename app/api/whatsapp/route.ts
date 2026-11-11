@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { runAgent } from "@/lib/agent";
 import { markEventProcessed } from "@/lib/ledger";
+import { logChat, saveVoiceNote, updateChat } from "@/lib/chatlog";
 import {
   downloadMedia,
   formatReply,
@@ -60,17 +61,25 @@ export async function POST(req: Request) {
     runAfterResponse(async () => {
       try {
         await rememberShop(msg.from);
+        // Mirror the shopkeeper's message on the demo screen straight away.
+        const mirrored = await logChat(
+          isAudio ? { from: "shop", kind: "voice" } : { from: "shop", kind: "text", text: text || "(message Sauti can't read)" },
+        );
         if (!isAudio && !text) {
           await sendWhatsApp(msg.from, "Tuma ujumbe wa sauti au maandishi.\n\n_EN: Send a voice note or a text message._");
           return;
         }
         if (isAudio && process.env.WHATSAPP_ACK !== "false") {
-          await sendWhatsApp(msg.from, "⏳ Nimesikia, naandika…\n_EN: Got it, writing it down…_");
+          await sendWhatsApp(msg.from, "⏳ Nimesikia, naandika…\n_EN: Got it, writing it down…_", "ack");
         }
         const result = isAudio
           ? await (async () => {
               const media = await downloadMedia(msg.audio!.id);
-              return runAgent({ kind: "audio", data: media.data, mimeType: media.mimeType }, { source: "whatsapp" });
+              const audio = await saveVoiceNote(media.data, media.mimeType).catch(() => undefined);
+              if (audio) await updateChat(mirrored.id, { audio });
+              const r = await runAgent({ kind: "audio", data: media.data, mimeType: media.mimeType }, { source: "whatsapp" });
+              await updateChat(mirrored.id, { transcript: r.transcript });
+              return r;
             })()
           : await runAgent({ kind: "text", text }, { source: "whatsapp" });
         await sendWhatsApp(msg.from, formatReply(result.reply, result.transcript));
