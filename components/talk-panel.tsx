@@ -10,6 +10,8 @@ import type { AgentResponse } from "@/lib/types";
 // Phrases a judge who doesn't speak Swahili can tap to try the full flow.
 const TRY_THESE = [
   { sw: "Mama Asha amechukua mchele wa 15,000.", en: "Mama Asha took rice worth 15,000." },
+  { sw: "Nani hajalipa?", en: "Who hasn't paid? (Sauti asks PayPal)" },
+  { sw: "Mkumbushe Juma.", en: "Remind Juma, by PayPal." },
   { sw: "Mama Asha amechukua mafuta ya 8,000 na sukari ya 4,500.", en: "She took oil (8,000) and sugar (4,500)." },
   { sw: "Pochi ya Mama Asha ina kiasi gani?", en: "How much is in Mama Asha's wallet?" },
   { sw: "Naweza kumkopesha Mama Asha?", en: "Can I give Mama Asha credit?" },

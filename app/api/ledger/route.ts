@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { lastActivity } from "@/lib/activity";
+import { maybeSyncWithPayPal } from "@/lib/paypal-sync";
 import {
   activeEntries,
   balances,
@@ -12,6 +14,8 @@ import {
 export const dynamic = "force-dynamic";
 
 export async function GET() {
+  // Catch up with PayPal in the background, in case a payment webhook was missed.
+  void maybeSyncWithPayPal();
   const contacts = await listContacts();
   return NextResponse.json({
     entries: (await activeEntries()).reverse(),
@@ -20,6 +24,7 @@ export async function GET() {
     topups: (await listTopups()).filter((t) => !t.cancelledAt).reverse(),
     walletLowTzs: WALLET_LOW_TZS,
     notices: await latestNotices(),
+    activity: await lastActivity(),
     // Names and who pays each tab. Emails stay on the server.
     customers: contacts.map((c) => ({
       name: c.name,

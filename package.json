@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test:agent": "tsx scripts/test-agent.ts"
+    "test:agent": "tsx scripts/test-agent.ts",
+    "test:unhappy": "tsx scripts/test-unhappy.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.99",

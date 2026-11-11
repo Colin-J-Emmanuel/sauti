@@ -58,8 +58,13 @@ function describe(actions: AgentAction[]): Step[] {
       case "link_topup_invoice":
         return { icon: Link2, text: `Wallet will be credited ${tzs(args.amountTzs)} the moment PayPal confirms payment`, error };
       case "open_invoices": {
-        const n = Array.isArray(res) ? res.length : 0;
-        return { icon: Search, text: `Checked unpaid PayPal requests: ${n} waiting`, error };
+        const rows: any[] = Array.isArray(res) ? res : [];
+        const nowPaid = rows.filter((r) => r.updated === "paid").length;
+        const waiting = rows.filter((r) => !r.updated).length;
+        const first = rows.find((r) => !r.updated && r.payer);
+        if (first) lastRecipient = first.payer;
+        const parts = [`${waiting} still waiting`, ...(nowPaid ? [`${nowPaid} just found paid`] : [])];
+        return { icon: Search, paypal: true, text: `Asked PayPal about open requests: ${parts.join(", ")}`, error };
       }
       case "get_family_tab": {
         if (res?.payer) lastRecipient = `${res.payer.name} in ${res.payer.city}`;

@@ -70,9 +70,9 @@ export async function POST(req: Request) {
         const result = isAudio
           ? await (async () => {
               const media = await downloadMedia(msg.audio!.id);
-              return runAgent({ kind: "audio", data: media.data, mimeType: media.mimeType });
+              return runAgent({ kind: "audio", data: media.data, mimeType: media.mimeType }, { source: "whatsapp" });
             })()
-          : await runAgent({ kind: "text", text });
+          : await runAgent({ kind: "text", text }, { source: "whatsapp" });
         await sendWhatsApp(msg.from, formatReply(result.reply, result.transcript));
       } catch (err) {
         console.error("[whatsapp]", err);

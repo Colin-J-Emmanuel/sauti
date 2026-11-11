@@ -34,8 +34,10 @@ export type LedgerData = {
   walletLowTzs: number;
   notices: Notice[];
   customers: Customer[];
+  activity: Activity | null;
   tzsPerUsd: number;
 };
 
 export type AgentAction = { tool: string; args: any; result: any };
+export type Activity = { at: string; source: "app" | "whatsapp"; said: string; spoken: boolean; reply: string; actions: AgentAction[] };
 export type AgentResponse = { reply?: string; actions?: AgentAction[]; transcript?: string; error?: string };

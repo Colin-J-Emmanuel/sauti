@@ -2,6 +2,8 @@ import { generateText, stepCountIs, tool, type LanguageModel, type ModelMessage,
 import { PayPalAgentToolkit } from "@paypal/agent-toolkit/ai-sdk";
 import { z } from "zod";
 import { appendTurn, loadHistory } from "./history";
+import { recordActivity } from "./activity";
+import { syncWithPayPal } from "./paypal-sync";
 import { AGENT_MODELS, languageModel, transcribeVoiceNote } from "./models";
 import {
   openInvoices,
@@ -122,9 +124,13 @@ const ledgerTools = {
 
   open_invoices: tool({
     description:
-      "Every PayPal request still unpaid (wallet top-ups and tab bills) with invoice ids and days waiting. Use for 'nani hajalipa?' (who hasn't paid?) and to find the invoice id before sending a reminder.",
+      "Asks PayPal for the live status of every open request (wallet top-ups and tab bills): invoice id, customer, relative, amount, days waiting and PayPal's status. Anything PayPal reports as paid or cancelled is settled on the spot (updated: 'paid' / 'cancelled'). Use for 'nani hajalipa?' (who hasn't paid?), 'Juma amelipa?' (has Juma paid?), and to find the invoice id before sending a reminder.",
     inputSchema: z.object({}),
-    execute: async () => openInvoices(),
+    execute: async () => {
+      const checked = await syncWithPayPal();
+      // Without PayPal credentials (local tests), fall back to the ledger's own view.
+      return checked.length || process.env.PAYPAL_CLIENT_ID ? checked : openInvoices();
+    },
   }),
 
   get_balances: tool({
@@ -189,7 +195,13 @@ Rules:
 - Wallet questions ("pochi ya Mama Asha ina kiasi gani?") → get_wallet.
 - "Naweza kumkopesha X?" (can I give X credit?) → get_wallet and advise from paymentRecord and what is owed: say how many PayPal requests
   the family has paid and how quickly. Be honest when there is no record yet.
-- "Nani hajalipa?" (who hasn't paid?) → open_invoices. To remind someone ("mkumbushe Juma") → open_invoices for the invoice id, then send_invoice_reminder.
+- "Nani hajalipa?" (who hasn't paid?) or "Juma amelipa?" → open_invoices, which checks with PayPal. Say what PayPal reports, including anything it just found paid.
+  To remind someone ("mkumbushe Juma") → open_invoices for the invoice id, then send_invoice_reminder with that invoice id
+  (a short note in English, e.g. "A friendly reminder from Duka la Mzee Salim about Mama Asha's grocery wallet."). If nothing is open, say there is nothing to remind.
+- Sauti only REQUESTS money from relatives abroad; it cannot send money out, pay suppliers or give change. If asked to send or pay money
+  ("tuma pesa kwa…", "mlipe…"), say plainly that Sauti can't send money yet, and offer what it can do (record it, or request money). Never
+  create an invoice to the person the trader wants to pay.
+- If a tool or PayPal returns an error, tell the trader plainly what failed and that nothing was sent; never claim success.
 - The trader can still bill the exact tab instead of a top-up ("tuma bili", "mdai", "tuma ankara"):
   1. get_family_tab for that customer. If payer is null, tell the trader nobody abroad is linked to that customer and stop. If there are no entries, say the tab is clear.
   2. create_invoice: currency_code "USD"; recipient = the payer's email and name; one line item per entry,
@@ -224,7 +236,10 @@ export type AgentInput =
   | { kind: "text"; text: string }
   | { kind: "audio"; data: Uint8Array; mimeType: string };
 
-export async function runAgent(input: AgentInput, opts: { model?: LanguageModel } = {}) {
+export async function runAgent(
+  input: AgentInput,
+  opts: { model?: LanguageModel; source?: "app" | "whatsapp" } = {},
+) {
   // Voice notes are transcribed first (ElevenLabs Scribe), then handled exactly like typed text.
   const transcript =
     input.kind === "audio" ? await transcribeVoiceNote(input.data) : undefined;
@@ -277,6 +292,7 @@ export async function runAgent(input: AgentInput, opts: { model?: LanguageModel 
   );
 
   await appendTurn([{ role: "user", content: userText }, ...result.responseMessages]);
+  await recordActivity({ source: opts.source ?? "app", said: userText, spoken: input.kind === "audio", reply: result.text, actions });
 
   return { reply: result.text, actions, transcript };
 }

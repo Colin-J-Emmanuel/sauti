@@ -1,5 +1,5 @@
 // Thin REST helpers for the parts the Agent Toolkit doesn't cover (webhook verification).
-const BASE = "https://api-m.sandbox.paypal.com";
+export const BASE = "https://api-m.sandbox.paypal.com";
 
 let cached: { token: string; expires: number } | null = null;
 

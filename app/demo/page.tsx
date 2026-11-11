@@ -2,12 +2,12 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Check, ExternalLink } from "lucide-react";
+import { Check, ExternalLink, MessageCircle } from "lucide-react";
 import { TalkPanel } from "@/components/talk-panel";
 import { Daftari } from "@/components/daftari";
 import { AgentSteps } from "@/components/agent-steps";
 import { useLedger } from "@/hooks/use-ledger";
-import type { AgentAction, Entry, LedgerData } from "@/lib/types";
+import type { Entry, LedgerData } from "@/lib/types";
 
 const tzs = (n: number) => `${Math.round(n).toLocaleString("en-US")} TZS`;
 
@@ -124,7 +124,8 @@ function purchaseTag(e: Entry) {
 
 export default function TwoCities() {
   const { data, freshPaymentAt, refresh } = useLedger();
-  const [actions, setActions] = useState<AgentAction[]>([]);
+  const [localAt, setLocalAt] = useState<string>("");
+  const activity = data?.activity ?? null;
   const fam = familyView(data);
   const payer = fam?.customer.payer;
   const who = payer?.name ?? "Familia";
@@ -173,8 +174,8 @@ export default function TwoCities() {
             <div className="px-4 pb-5 pt-9">
               <TalkPanel
                 compact
-                onDone={(reply) => {
-                  setActions(reply?.actions ?? []);
+                onDone={() => {
+                  setLocalAt(new Date().toISOString());
                   refresh();
                 }}
               />
@@ -208,9 +209,17 @@ export default function TwoCities() {
             ))}
           </ol>
           {/* What the agent just did, with its PayPal calls marked */}
-          {actions.length > 0 && (
-            <div className="mt-6 border-t border-ink-2 pt-1">
-              <AgentSteps actions={actions} />
+          {activity && activity.actions.length > 0 && (
+            <div key={activity.at} className="mt-6 border-t border-ink-2 pt-4 animate-in fade-in duration-500">
+              {activity.source === "whatsapp" && activity.at > localAt && (
+                <p className="flex items-start gap-2 text-sm text-ink-soft">
+                  <MessageCircle aria-hidden className="mt-0.5 size-4 shrink-0 text-[#25d366]" />
+                  <span>
+                    On WhatsApp: <span className="text-white">“{activity.said}”</span>
+                  </span>
+                </p>
+              )}
+              <AgentSteps actions={activity.actions} />
             </div>
           )}
         </div>
