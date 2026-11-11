@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AgentSteps } from "@/components/agent-steps";
 import type { AgentResponse } from "@/lib/types";
+import type { Lang } from "@/components/whatsapp-thread";
 
 // Phrases a judge who doesn't speak Swahili can tap to try the full flow.
 const TRY_THESE = [
@@ -17,7 +18,7 @@ const TRY_THESE = [
   { sw: "Naweza kumkopesha Mama Asha?", en: "Can I give Mama Asha credit?" },
 ];
 
-type Exchange = { said: string; spoken: boolean; reply: AgentResponse };
+type Exchange = { said: string; saidEn?: string; spoken: boolean; reply: AgentResponse };
 
 function splitReply(reply = "") {
   const [sw, ...rest] = reply.split(/\n?\s*EN:\s*/);
@@ -27,9 +28,12 @@ function splitReply(reply = "") {
 export function TalkPanel({
   onDone,
   compact = false,
+  lang,
 }: {
   onDone: (reply?: AgentResponse) => void;
   compact?: boolean;
+  /** Set on the demo screen: show one language. Unset (the shopkeeper's app): Swahili with English under it. */
+  lang?: Lang;
 }) {
   const [state, setState] = useState<"idle" | "recording" | "working">("idle");
   const [seconds, setSeconds] = useState(0);
@@ -52,7 +56,7 @@ export function TalkPanel({
     let reply: AgentResponse | undefined;
     try {
       const res = (await (await fetch("/api/agent", { method: "POST", body: form })).json()) as AgentResponse;
-      setLast({ said: spoken ? (res.transcript ?? "") : said, spoken, reply: res });
+      setLast({ said: spoken ? (res.transcript ?? "") : said, saidEn: res.saidEn, spoken, reply: res });
       reply = res;
     } catch {
       setLast({ said, spoken, reply: { error: "Sauti couldn't be reached. Check your connection and try again." } });
@@ -131,16 +135,33 @@ export function TalkPanel({
           </button>
         </div>
         <div className={compact ? "" : "text-center"}>
-        <p className={compact ? "text-lg font-semibold" : "mt-6 text-xl font-semibold"} aria-live="polite">
-          {state === "recording"
-            ? `Nakusikiliza… 0:${String(seconds).padStart(2, "0")}`
-            : state === "working"
-              ? "Sauti inaandika…"
-              : "Bonyeza uongee"}
+        <p lang={lang === "en" ? undefined : "sw"} className={compact ? "text-lg font-semibold" : "mt-6 text-xl font-semibold"} aria-live="polite">
+          {lang === "en"
+            ? state === "recording"
+              ? `Listening… 0:${String(seconds).padStart(2, "0")}`
+              : state === "working"
+                ? "Sauti is writing it down…"
+                : "Tap and speak Swahili"
+            : state === "recording"
+              ? `Nakusikiliza… 0:${String(seconds).padStart(2, "0")}`
+              : state === "working"
+                ? "Sauti inaandika…"
+                : "Bonyeza uongee"}
         </p>
-        <p className="text-sm text-ink-soft">
-          {state === "recording" ? "Listening. Tap again when you're done." : state === "working" ? "Writing it down." : "Tap and speak in Swahili"}
-        </p>
+        {lang !== "sw" && (
+          <p className="text-sm text-ink-soft">
+            {state === "recording"
+              ? "Tap again when you're done."
+              : state === "working"
+                ? lang === "en" ? "Usually a few seconds." : "Writing it down."
+                : lang === "en" ? "Or tap an example below" : "Tap and speak in Swahili"}
+          </p>
+        )}
+        {lang === "sw" && (
+          <p lang="sw" className="text-sm text-ink-soft">
+            {state === "recording" ? "Bonyeza tena ukimaliza." : state === "working" ? "Inachukua sekunde chache." : "Au chagua mfano hapa chini"}
+          </p>
+        )}
         </div>
       </div>
 
@@ -159,7 +180,7 @@ export function TalkPanel({
           id="say"
           value={text}
           onChange={(e) => setText(e.target.value)}
-          placeholder="…au andika hapa (or type)"
+          placeholder={lang === "en" ? "…or type here" : lang === "sw" ? "…au andika hapa" : "…au andika hapa (or type)"}
           disabled={state !== "idle"}
           className="h-11 border-ink-2 bg-ink-2/60 text-white placeholder:text-ink-soft"
         />
@@ -180,7 +201,12 @@ export function TalkPanel({
             {last.said && (
               <p className={"ml-auto w-fit max-w-[90%] rounded-2xl rounded-br-sm bg-ink-2 " + (compact ? "px-3 py-2 text-sm" : "px-4 py-2.5 text-[0.95rem]")}>
                 {last.spoken && <Mic aria-label="Spoken" className="mr-1.5 inline size-3.5 -translate-y-px text-marigold" />}
-                {last.said}
+                {lang === "en" && last.saidEn ? last.saidEn : last.said}
+                {lang === "en" && last.saidEn && (
+                  <span lang="sw" className="mt-0.5 block text-xs italic text-white/60">
+                    Kiswahili: {last.said}
+                  </span>
+                )}
               </p>
             )}
             <div className="mt-3 rounded-2xl rounded-bl-sm bg-white px-4 py-3 text-ink">
@@ -188,19 +214,23 @@ export function TalkPanel({
                 <p className="text-[0.95rem] text-margin">{last.reply.error}</p>
               ) : (
                 <>
-                  <p className={compact ? "text-[0.92rem] leading-snug" : "text-[1.05rem] leading-snug"}>{reply?.sw}</p>
-                  {reply?.en && (
+                  <p lang={lang === "en" ? undefined : "sw"} className={compact ? "text-[0.92rem] leading-snug" : "text-[1.05rem] leading-snug"}>
+                    {lang === "en" ? reply?.en || reply?.sw : reply?.sw}
+                  </p>
+                  {!lang && reply?.en && (
                     <p className={"leading-snug text-muted-foreground " + (compact ? "mt-1.5 text-xs" : "mt-2 text-sm")}>{reply.en}</p>
                   )}
                 </>
               )}
             </div>
-            {!compact && <AgentSteps actions={last.reply.actions ?? []} />}
+            {!compact && <AgentSteps actions={last.reply.actions ?? []} lang={lang} />}
           </>
         )}
         {!pending && !last && (
           <div>
-            <h3 className="text-sm font-semibold text-ink-soft">Try saying, or tap one</h3>
+            <h3 className="text-sm font-semibold text-ink-soft">
+              {lang === "sw" ? "Sema, au chagua mmoja" : "Try saying, or tap one"}
+            </h3>
             <ul className="mt-2 space-y-2">
               {TRY_THESE.map((t) => (
                 <li key={t.sw}>
@@ -209,8 +239,8 @@ export function TalkPanel({
                     disabled={state !== "idle"}
                     className={"w-full rounded-xl border border-ink-2 text-left transition-colors hover:bg-ink-2 " + (compact ? "px-3 py-2" : "px-4 py-2.5")}
                   >
-                    <span className={compact ? "block text-sm" : "block text-[0.95rem]"}>{t.sw}</span>
-                    {!compact && <span className="block text-sm text-ink-soft">{t.en}</span>}
+                    <span lang="sw" className={compact ? "block text-sm" : "block text-[0.95rem]"}>{t.sw}</span>
+                    {(!compact || lang === "en") && <span className={"block text-ink-soft " + (compact ? "text-xs" : "text-sm")}>{t.en}</span>}
                   </button>
                 </li>
               ))}
@@ -220,14 +250,14 @@ export function TalkPanel({
       </div>
       {!pending && last && (
         <details className="mt-5 text-sm text-ink-soft">
-          <summary className="cursor-pointer">More things to try</summary>
+          <summary className="cursor-pointer">{lang === "sw" ? "Jaribu mengine" : "More things to try"}</summary>
           <ul className="mt-2 space-y-1.5">
             {TRY_THESE.map((t) => (
               <li key={t.sw}>
                 <button onClick={() => sendText(t.sw)} disabled={state !== "idle"} className="text-left text-white underline-offset-4 hover:underline">
                   {t.sw}
                 </button>
-                <span className="block">{t.en}</span>
+                {lang !== "sw" && <span className="block">{t.en}</span>}
               </li>
             ))}
           </ul>

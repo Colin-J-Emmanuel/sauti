@@ -1,5 +1,5 @@
 import { walletBalances, type PaymentNotice } from "./ledger";
-import { runAfterResponse, sendWhatsApp, shopNumber, whatsappEnabled } from "./whatsapp";
+import { sendWhatsApp, shopNumber, whatsappEnabled } from "./whatsapp";
 
 const tzs = (n: number) => `${Math.round(n).toLocaleString("en-US")} TZS`;
 
@@ -15,11 +15,14 @@ export async function paymentMessage(n: PaymentNotice) {
   return `💸 *${who} amelipa ${tzs(n.amountTzs)}* kwa ${n.customer} kupitia PayPal. Deni limefutwa.\n\n_EN: ${n.payer ?? "Family abroad"} paid ${n.customer}'s tab with PayPal. The tab is cleared._`;
 }
 
-/** Tell the shopkeeper on WhatsApp, after the current response so it never slows PayPal or the page down. */
+/** Tell the shopkeeper on WhatsApp, in the background so it never slows PayPal or the page down.
+ *  (Not Next's after(): the background PayPal check runs once the ledger response has already gone,
+ *  where after() silently does nothing. The server stays up, so a plain background task is safe.) */
 export function notifyShop(n: PaymentNotice) {
   if (!whatsappEnabled()) return;
-  runAfterResponse(async () => {
+  void (async () => {
     const to = await shopNumber();
-    if (to) await sendWhatsApp(to, await paymentMessage(n), "alert");
-  });
+    if (!to) return console.warn("[notify] no shopkeeper number yet; message Sauti on WhatsApp once first");
+    await sendWhatsApp(to, await paymentMessage(n), "alert");
+  })().catch((err) => console.error("[notify]", err));
 }

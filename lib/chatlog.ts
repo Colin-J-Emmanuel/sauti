@@ -13,6 +13,7 @@ export type ChatMessage = {
   kind: "text" | "voice" | "ack" | "reply" | "alert";
   text?: string; // what was typed, or Sauti's message
   transcript?: string; // for a voice note, once Sauti has heard it
+  textEn?: string; // English translation of what the shopkeeper typed or said
   audio?: string; // media id served by /api/whatsapp/media/<id>
   seconds?: number;
 };

@@ -6,7 +6,7 @@ import { Check, ExternalLink, MessageCircle } from "lucide-react";
 import { TalkPanel } from "@/components/talk-panel";
 import { Daftari } from "@/components/daftari";
 import { AgentSteps } from "@/components/agent-steps";
-import { WhatsAppThread } from "@/components/whatsapp-thread";
+import { WhatsAppThread, type Lang } from "@/components/whatsapp-thread";
 import { useLedger } from "@/hooks/use-ledger";
 import type { Entry, LedgerData } from "@/lib/types";
 
@@ -84,6 +84,62 @@ function Phone({ label, children, light = false }: { label: string; children: Re
   );
 }
 
+/** English for judges by default; Kiswahili shows the shopkeeper's side as he sees it. ?lang=sw works too. */
+function useLang(): [Lang, (l: Lang) => void] {
+  const [lang, setLangState] = useState<Lang>("en");
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search).get("lang");
+    let saved: string | null = null;
+    try {
+      saved = localStorage.getItem("sauti-demo-lang");
+    } catch {}
+    const l = q === "sw" || q === "en" ? q : saved === "sw" ? "sw" : "en";
+    setLangState(l);
+  }, []);
+  useEffect(() => {
+    document.documentElement.lang = lang === "sw" ? "sw" : "en";
+  }, [lang]);
+  const setLang = (l: Lang) => {
+    setLangState(l);
+    try {
+      localStorage.setItem("sauti-demo-lang", l);
+    } catch {}
+    const url = new URL(window.location.href);
+    if (l === "sw") url.searchParams.set("lang", "sw");
+    else url.searchParams.delete("lang");
+    window.history.replaceState(null, "", url);
+  };
+  return [lang, setLang];
+}
+
+function LangToggle({ lang, setLang }: { lang: Lang; setLang: (l: Lang) => void }) {
+  return (
+    <div role="radiogroup" aria-label="Language" className="inline-flex rounded-full bg-ink-2/70 p-1 text-sm">
+      {(
+        [
+          ["en", "English"],
+          ["sw", "Kiswahili"],
+        ] as const
+      ).map(([l, label]) => (
+        <button
+          key={l}
+          role="radio"
+          aria-checked={lang === l}
+          lang={l}
+          onClick={() => setLang(l)}
+          className={
+            "rounded-full px-3.5 py-1 font-semibold transition-colors " + (lang === l ? "bg-white text-ink" : "text-ink-soft hover:text-white")
+          }
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+const RELATION_SW: Record<string, string> = { son: "mwanawe", daughter: "binti yake", granddaughter: "mjukuu wake", grandson: "mjukuu wake" };
+
 function City({ name, zone, who }: { name: string; zone: string; who: string }) {
   const time = useClock(zone);
   return (
@@ -125,6 +181,8 @@ function purchaseTag(e: Entry) {
 
 export default function TwoCities() {
   const { data, freshPaymentAt, refresh } = useLedger();
+  const [lang, setLang] = useLang();
+  const sw = lang === "sw";
   const [localAt, setLocalAt] = useState<string>("");
   const [tab, setTab] = useState<"app" | "whatsapp">("app");
   const chat = data?.whatsapp ?? [];
@@ -155,28 +213,37 @@ export default function TwoCities() {
   const who = payer?.name ?? "Familia";
   const she = fam?.customer.name ?? "Mteja";
 
+  const payerName = payer?.name ?? (sw ? "familia" : "the family");
   const steps = [
     {
       done: !!fam?.anySale,
-      sw: `${she} ananunua dukani`,
-      en: "She shops. The shopkeeper says it, and Sauti writes it in the daftari.",
+      title: sw ? `${she} ananunua dukani` : `${she} shops`,
+      body: sw
+        ? "Anachukua bidhaa. Muuza duka anasema, na Sauti anaandika kwenye daftari."
+        : "The shopkeeper says it out loud, and Sauti writes it in the daftari.",
     },
     {
       done: !!fam?.anyRequest,
-      sw: `Sauti anamwomba ${who} ajaze pochi`,
-      en: `On its own, Sauti sends ${payer?.name ?? "the family"} a PayPal request to fund her grocery wallet.`,
+      title: sw ? `Sauti anamwomba ${who} ajaze pochi` : `Sauti asks ${who} to top up`,
+      body: sw
+        ? `Bila kuambiwa, Sauti anamtumia ${payerName} ombi la PayPal la kujaza pochi yake ya manunuzi.`
+        : `On its own, Sauti sends ${payerName} a PayPal request to fund her grocery wallet.`,
       arrow: "→",
     },
     {
       done: !!fam?.anyPaid,
-      sw: `${who} analipa kwa PayPal`,
-      en: "He pays in one tap. What she owed is cleared, and the rest waits in her wallet.",
+      title: sw ? `${who} analipa kwa PayPal` : `${who} pays with PayPal`,
+      body: sw
+        ? "Analipa kwa mguso mmoja. Deni lake linafutwa, na kinachobaki kinakaa kwenye pochi."
+        : "One tap. What she owed is cleared, and the rest waits in her wallet.",
       arrow: "←",
     },
     {
       done: !!fam?.walletPaidSomething,
-      sw: "Pochi inalipa manunuzi",
-      en: "Her next purchases are paid on the spot. When the wallet runs low, Sauti asks again.",
+      title: sw ? "Pochi inalipa manunuzi" : "The wallet pays for her groceries",
+      body: sw
+        ? "Manunuzi yajayo yanalipwa papo hapo. Pochi ikipungua, Sauti anaomba tena."
+        : "Her next purchases are paid on the spot. When the wallet runs low, Sauti asks again.",
     },
   ];
   const current = steps.findIndex((s) => !s.done);
@@ -187,13 +254,20 @@ export default function TwoCities() {
         <Link href="/" className="text-3xl font-extrabold tracking-tight">
           Sauti
         </Link>
-        <p className="text-sm text-ink-soft">A PayPal agent that speaks Swahili: one family wallet, two cities</p>
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+          <p className="text-sm text-ink-soft">
+            {sw
+              ? "Wakala wa PayPal anayezungumza Kiswahili: pochi moja ya familia, miji miwili"
+              : "A PayPal agent that speaks Swahili: one family wallet, two cities"}
+          </p>
+          <LangToggle lang={lang} setLang={setLang} />
+        </div>
       </header>
 
       <div className="mx-auto mt-6 grid max-w-[80rem] items-start justify-items-center gap-8 lg:grid-cols-[1fr_19rem_1fr]">
         {/* Dar es Salaam: the real app */}
         <div className="w-full max-w-[24rem]">
-          <City name="Dar es Salaam" zone="Africa/Dar_es_Salaam" who="Mzee Salim's shop" />
+          <City name="Dar es Salaam" zone="Africa/Dar_es_Salaam" who={sw ? "duka la Mzee Salim" : "Mzee Salim's shop"} />
           <Phone label="The shopkeeper's phone in Dar es Salaam">
             <div className="px-4 pb-5 pt-9">
               <div role="tablist" aria-label="How the shopkeeper talks to Sauti" className="mb-3 grid grid-cols-2 rounded-full bg-ink-2/70 p-1 text-sm">
@@ -209,7 +283,7 @@ export default function TwoCities() {
                     }
                   >
                     {t === "app" ? (
-                      "Sauti app"
+                      sw ? "Programu ya Sauti" : "Sauti app"
                     ) : (
                       <>
                         <MessageCircle aria-hidden className={"size-4 " + (tab === t ? "text-[#1f9d55]" : "")} /> WhatsApp
@@ -225,6 +299,7 @@ export default function TwoCities() {
               <div hidden={tab !== "app"}>
                 <TalkPanel
                   compact
+                  lang={lang}
                   onDone={() => {
                     setLocalAt(new Date().toISOString());
                     refresh();
@@ -232,7 +307,7 @@ export default function TwoCities() {
                 />
               </div>
               <div hidden={tab !== "whatsapp"}>
-                <WhatsAppThread messages={chat} />
+                <WhatsAppThread messages={chat} lang={lang} visible={tab === "whatsapp"} />
               </div>
             </div>
             <div className="min-h-[24rem] bg-paper">
@@ -243,7 +318,7 @@ export default function TwoCities() {
 
         {/* The journey: a real sequence, lit as each step happens */}
         <div className="w-full max-w-[24rem] lg:mt-24">
-          <ol className="space-y-5" aria-label="How the money moves">
+          <ol className="space-y-5" aria-label={sw ? "Pesa inavyosafiri" : "How the money moves"}>
             {steps.map((s, i) => (
               <li key={i} className={"flex gap-3 transition-opacity duration-500 " + (s.done || i === current ? "opacity-100" : "opacity-45")}>
                 <span
@@ -256,9 +331,9 @@ export default function TwoCities() {
                 </span>
                 <span>
                   <span className="block font-semibold leading-snug">
-                    {s.sw} {s.arrow && <span className="text-marigold">{s.arrow}</span>}
+                    {s.title} {s.arrow && <span className="text-marigold">{s.arrow}</span>}
                   </span>
-                  <span className="block text-sm leading-snug text-ink-soft">{s.en}</span>
+                  <span className="block text-sm leading-snug text-ink-soft">{s.body}</span>
                 </span>
               </li>
             ))}
@@ -270,11 +345,17 @@ export default function TwoCities() {
                 <p className="flex items-start gap-2 text-sm text-ink-soft">
                   <MessageCircle aria-hidden className="mt-0.5 size-4 shrink-0 text-[#25d366]" />
                   <span>
-                    On WhatsApp: <span className="text-white">“{activity.said}”</span>
+                    {sw ? "Kwenye WhatsApp" : "On WhatsApp"}:{" "}
+                    <span className="text-white">“{!sw && activity.saidEn ? activity.saidEn : activity.said}”</span>
+                    {!sw && activity.saidEn && (
+                      <span lang="sw" className="mt-0.5 block text-xs italic">
+                        Kiswahili: “{activity.said}”
+                      </span>
+                    )}
                   </span>
                 </p>
               )}
-              <AgentSteps actions={activity.actions} />
+              <AgentSteps actions={activity.actions} lang={lang} />
             </div>
           )}
         </div>
@@ -284,7 +365,15 @@ export default function TwoCities() {
           <City
             name={payer?.city ?? "New York"}
             zone={payer?.city === "Houston" ? "America/Chicago" : "America/New_York"}
-            who={payer ? `her ${payer.relation} ${payer.name}` : "the family"}
+            who={
+              payer
+                ? sw
+                  ? `${RELATION_SW[payer.relation] ?? payer.relation} ${payer.name}`
+                  : `her ${payer.relation} ${payer.name}`
+                : sw
+                  ? "familia"
+                  : "the family"
+            }
           />
           <Phone label={`${payer?.name ?? "The family"}'s phone`} light>
             <div className="flex min-h-full flex-col px-5 pb-5 pt-10 text-foreground">
@@ -363,8 +452,9 @@ export default function TwoCities() {
         </div>
       </div>
       <p className="mx-auto mt-8 max-w-[80rem] text-xs text-ink-soft/80">
-        Demo view on PayPal's sandbox. The left phone is the live app; the right phone shows what the family sees, updated when
-        PayPal confirms a payment.
+        {sw
+          ? `Onyesho kwenye sandbox ya PayPal. Simu ya kushoto ni programu halisi; ya kulia inaonyesha anachokiona ${payerName}, kwa Kiingereza kwa sababu anaishi ${payer?.city ?? "nje"}, na inasasishwa PayPal inapothibitisha malipo.`
+          : "Demo view on PayPal's sandbox. The left phone is the live app; the right phone shows what the family sees, updated when PayPal confirms a payment."}
       </p>
     </main>
   );

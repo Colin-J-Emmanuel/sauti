@@ -4,7 +4,7 @@ import { z } from "zod";
 import { appendTurn, loadHistory } from "./history";
 import { recordActivity } from "./activity";
 import { syncWithPayPal } from "./paypal-sync";
-import { AGENT_MODELS, languageModel, transcribeVoiceNote } from "./models";
+import { AGENT_MODELS, languageModel, transcribeVoiceNote, translateToEnglish } from "./models";
 import {
   openInvoices,
   recordTabSale,
@@ -248,6 +248,8 @@ export async function runAgent(
     return { reply: "Samahani, sikusikia vizuri. Tafadhali rudia.\nEN: Sorry, I didn't catch that. Please say it again.", actions: [], transcript };
   }
 
+  // Translate for the demo screen while the agent works, so it adds no waiting.
+  const translation = translateToEnglish(userText);
   const history = await loadHistory();
   const system = SYSTEM + (await customersNote());
   const run = (model: LanguageModel, onStep: () => void) =>
@@ -292,7 +294,8 @@ export async function runAgent(
   );
 
   await appendTurn([{ role: "user", content: userText }, ...result.responseMessages]);
-  await recordActivity({ source: opts.source ?? "app", said: userText, spoken: input.kind === "audio", reply: result.text, actions });
+  const saidEn = await translation;
+  await recordActivity({ source: opts.source ?? "app", said: userText, saidEn, spoken: input.kind === "audio", reply: result.text, actions });
 
-  return { reply: result.text, actions, transcript };
+  return { reply: result.text, actions, transcript, saidEn };
 }

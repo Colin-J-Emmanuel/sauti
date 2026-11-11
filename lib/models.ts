@@ -1,4 +1,4 @@
-import { transcribe, type LanguageModel } from "ai";
+import { generateText, transcribe, type LanguageModel } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
 import { elevenlabs } from "@ai-sdk/elevenlabs";
 import { google } from "@ai-sdk/google";
@@ -38,4 +38,25 @@ export async function transcribeVoiceNote(audio: Uint8Array): Promise<string> {
     maxRetries: 3,
   });
   return text.trim();
+}
+
+/** A plain English rendering of what the shopkeeper said, for viewers who don't speak Swahili. Best effort: "" on failure. */
+export async function translateToEnglish(text: string): Promise<string> {
+  if (!text.trim()) return "";
+  try {
+    const { text: out } = await generateText({
+      model: languageModel(AGENT_MODELS[0]),
+      system:
+        "Translate the shopkeeper's message from Swahili (or a Swahili-English mix) into natural English. " +
+        "Keep names, numbers and currency as said (\"elfu kumi na tano\" becomes \"fifteen thousand\"). " +
+        "Reply with the translation only: no quotes, no notes. If it is already English, return it unchanged.",
+      prompt: text,
+      maxRetries: 2,
+      maxOutputTokens: 200,
+    });
+    return out.trim().replace(/^["“]|["”]$/g, "");
+  } catch (err) {
+    console.warn("[sauti] translation skipped", err);
+    return "";
+  }
 }

@@ -7,6 +7,7 @@ export type Activity = {
   at: string;
   source: "app" | "whatsapp";
   said: string;
+  saidEn?: string; // English translation, for the demo screen
   spoken: boolean;
   reply: string;
   actions: { tool: string; args: unknown; result: unknown }[];

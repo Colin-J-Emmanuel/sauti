@@ -78,10 +78,13 @@ export async function POST(req: Request) {
               const audio = await saveVoiceNote(media.data, media.mimeType).catch(() => undefined);
               if (audio) await updateChat(mirrored.id, { audio });
               const r = await runAgent({ kind: "audio", data: media.data, mimeType: media.mimeType }, { source: "whatsapp" });
-              await updateChat(mirrored.id, { transcript: r.transcript });
+              await updateChat(mirrored.id, { transcript: r.transcript, textEn: r.saidEn || undefined });
               return r;
             })()
-          : await runAgent({ kind: "text", text }, { source: "whatsapp" });
+          : await runAgent({ kind: "text", text }, { source: "whatsapp" }).then(async (r) => {
+              if (r.saidEn) await updateChat(mirrored.id, { textEn: r.saidEn });
+              return r;
+            });
         await sendWhatsApp(msg.from, formatReply(result.reply, result.transcript));
       } catch (err) {
         console.error("[whatsapp]", err);

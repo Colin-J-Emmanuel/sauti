@@ -4,6 +4,15 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import { Pause, Play } from "lucide-react";
 import type { ChatMessage } from "@/lib/types";
 
+export type Lang = "en" | "sw";
+
+/** Sauti writes "Swahili … \n\n_EN: English_". Show the part that matches the chosen language. */
+export function pickLang(text: string, lang: Lang) {
+  const [sw, ...rest] = text.split(/\n+\s*_?EN:\s*/);
+  const en = rest.join(" ").replace(/_\s*$/, "").trim();
+  return lang === "en" && en ? en : sw.trim();
+}
+
 const time = (iso: string) => new Date(iso).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
 
 /** WhatsApp's own markup: *bold* and _italic_. */
@@ -29,7 +38,7 @@ function Markup({ text }: { text: string }) {
 // A fixed, gentle waveform: it signals "voice note" without pretending to show the real audio.
 const BARS = [3, 6, 10, 7, 12, 9, 14, 8, 11, 6, 13, 9, 7, 11, 5, 9, 12, 6, 8, 4];
 
-function VoiceNote({ m }: { m: ChatMessage }) {
+function VoiceNote({ m, lang }: { m: ChatMessage; lang: Lang }) {
   const ref = useRef<HTMLAudioElement>(null);
   const [playing, setPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -80,14 +89,30 @@ function VoiceNote({ m }: { m: ChatMessage }) {
           }}
         />
       )}
-      <p className="mt-1.5 text-[0.8rem] leading-snug text-white/75">
-        {m.transcript ? `🎙 “${m.transcript}”` : "Sauti is listening…"}
+      {m.transcript ? (
+        <Said original={m.transcript} en={m.textEn} lang={lang} />
+      ) : (
+        <p className="mt-1.5 text-[0.8rem] leading-snug text-white/75">{lang === "en" ? "Sauti is listening…" : "Sauti inasikiliza…"}</p>
+      )}
+    </div>
+  );
+}
+
+/** What the shopkeeper said: in English mode, the translation first and the Swahili original under it. */
+function Said({ original, en, lang, voice = true }: { original: string; en?: string; lang: Lang; voice?: boolean }) {
+  const mark = voice ? "🎙 " : "";
+  if (lang === "sw" || !en) return <p className={voice ? "mt-1.5 text-[0.8rem] leading-snug text-white/75" : ""}>{voice ? `${mark}“${original}”` : original}</p>;
+  return (
+    <div className={voice ? "mt-1.5" : ""}>
+      <p className={voice ? "text-[0.85rem] leading-snug text-white" : ""}>{voice ? `${mark}“${en}”` : en}</p>
+      <p lang="sw" className="mt-0.5 text-[0.75rem] italic leading-snug text-white/60">
+        {voice ? `Kiswahili: “${original}”` : `Kiswahili: ${original}`}
       </p>
     </div>
   );
 }
 
-export function WhatsAppThread({ messages }: { messages: ChatMessage[] }) {
+export function WhatsAppThread({ messages, lang = "en", visible = true }: { messages: ChatMessage[]; lang?: Lang; visible?: boolean }) {
   const list = useRef<HTMLOListElement>(null);
   const last = messages.at(-1);
   // Keep the newest message in view; scroll only the thread, never the page or the phone.
@@ -98,7 +123,7 @@ export function WhatsAppThread({ messages }: { messages: ChatMessage[] }) {
     toBottom();
     const t = setTimeout(toBottom, 350); // after the bubble's entrance animation
     return () => clearTimeout(t);
-  }, [last?.id, last?.transcript, messages.length]);
+  }, [last?.id, last?.transcript, last?.textEn, messages.length, lang, visible]); // a hidden tab has no height: scroll again when shown
 
   return (
     <section aria-label="WhatsApp conversation with Sauti" className="text-white">
@@ -106,22 +131,26 @@ export function WhatsAppThread({ messages }: { messages: ChatMessage[] }) {
         <span className="grid size-9 place-items-center rounded-full bg-marigold text-sm font-extrabold text-ink">S</span>
         <span className="leading-tight">
           <span className="block font-semibold">Sauti</span>
-          <span className="block text-xs text-ink-soft">via WhatsApp, live from the shopkeeper's phone</span>
+          <span className="block text-xs text-ink-soft">
+            {lang === "en" ? "via WhatsApp, live from the shopkeeper's phone" : "kupitia WhatsApp, moja kwa moja kutoka simu ya muuza duka"}
+          </span>
         </span>
       </header>
 
       {messages.length === 0 ? (
         <p className="py-8 text-center text-sm leading-relaxed text-ink-soft">
-          No WhatsApp messages yet.
+          {lang === "en" ? "No WhatsApp messages yet." : "Bado hakuna ujumbe wa WhatsApp."}
           <br />
-          Send Sauti a voice note from your phone and it appears here as it happens.
+          {lang === "en"
+            ? "Send Sauti a voice note from your phone and it appears here as it happens."
+            : "Mtumie Sauti ujumbe wa sauti kutoka simu yako, nao utaonekana hapa papo hapo."}
         </p>
       ) : (
         <ol ref={list} className="max-h-[22rem] space-y-2 overflow-y-auto py-3 pr-1" aria-live="polite">
           {messages.map((m) => {
             const mine = m.from === "shop";
             // Sauti's replies repeat the transcript at the top; the voice note already shows it.
-            const text = m.text?.replace(/^🎙[^\n]*\n+/, "");
+            const text = pickLang(m.text?.replace(/^🎙[^\n]*\n+/, "") ?? "", lang);
             return (
               <li key={m.id} className={"flex animate-in fade-in slide-in-from-bottom-1 duration-300 " + (mine ? "justify-end" : "justify-start")}>
                 <div
@@ -136,7 +165,15 @@ export function WhatsAppThread({ messages }: { messages: ChatMessage[] }) {
                           : "rounded-bl-sm bg-white text-ink")
                   }
                 >
-                  {m.kind === "voice" ? <VoiceNote m={m} /> : <p className="whitespace-pre-line"><Markup text={text ?? ""} /></p>}
+                  {m.kind === "voice" ? (
+                    <VoiceNote m={m} lang={lang} />
+                  ) : mine ? (
+                    <Said original={m.text ?? ""} en={m.textEn} lang={lang} voice={false} />
+                  ) : (
+                    <p lang={lang === "sw" ? "sw" : undefined} className="whitespace-pre-line">
+                      <Markup text={text} />
+                    </p>
+                  )}
                   <span className={"mt-1 block text-right text-[0.65rem] " + (!mine && m.kind === "reply" ? "text-muted-foreground" : "text-white/60")}>
                     {time(m.at)}
                   </span>
@@ -145,6 +182,13 @@ export function WhatsAppThread({ messages }: { messages: ChatMessage[] }) {
             );
           })}
         </ol>
+      )}
+      {messages.length > 0 && (
+        <p className="pt-1 text-[0.7rem] leading-snug text-ink-soft/80">
+          {lang === "en"
+            ? "Sauti writes to the shop in Kiswahili with an English line. Showing the English."
+            : "Sauti anaandikia duka kwa Kiswahili, pamoja na mstari wa Kiingereza. Unaona Kiswahili."}
+        </p>
       )}
     </section>
   );

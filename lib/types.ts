@@ -40,8 +40,8 @@ export type LedgerData = {
 };
 
 export type AgentAction = { tool: string; args: any; result: any };
-export type Activity = { at: string; source: "app" | "whatsapp"; said: string; spoken: boolean; reply: string; actions: AgentAction[] };
-export type AgentResponse = { reply?: string; actions?: AgentAction[]; transcript?: string; error?: string };
+export type Activity = { at: string; source: "app" | "whatsapp"; said: string; saidEn?: string; spoken: boolean; reply: string; actions: AgentAction[] };
+export type AgentResponse = { reply?: string; actions?: AgentAction[]; transcript?: string; saidEn?: string; error?: string };
 
 export type ChatMessage = {
   id: string;
@@ -50,5 +50,6 @@ export type ChatMessage = {
   kind: "text" | "voice" | "ack" | "reply" | "alert";
   text?: string;
   transcript?: string;
+  textEn?: string;
   audio?: string;
 };
