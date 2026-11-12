@@ -523,3 +523,19 @@ export async function openInvoices() {
     out.push({ invoiceId, kind: "tab bill", customer: b.customer, payer: payerOf(b.customer), amountTzs: b.amountTzs, daysWaiting: days(b.at) });
   return out;
 }
+
+/**
+ * Start the demo over: empty daftari, no wallets, no open requests, no payment notices.
+ * Customers (contacts.json) stay, and so do processed event ids, so a late PayPal or WhatsApp
+ * retry is still ignored. Requests already sent in PayPal stay there; Sauti just forgets them.
+ */
+export async function resetLedger() {
+  return locked(async () => {
+    const log = await readEvents();
+    await fs.mkdir(DATA_DIR, { recursive: true });
+    await fs.writeFile(EVENTS_FILE, JSON.stringify({ processedIds: log.processedIds, notices: [] }, null, 2));
+    await fs.rm(LEDGER_FILE, { force: true });
+    await fs.rm(TOPUPS_FILE, { force: true });
+    lastSuggested.clear();
+  });
+}

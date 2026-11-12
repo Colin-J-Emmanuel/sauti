@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Check, ExternalLink, MessageCircle } from "lucide-react";
+import { Check, ExternalLink, MessageCircle, RotateCcw } from "lucide-react";
 import { TalkPanel } from "@/components/talk-panel";
 import { Daftari } from "@/components/daftari";
 import { AgentSteps } from "@/components/agent-steps";
@@ -138,6 +138,42 @@ function LangToggle({ lang, setLang }: { lang: Lang; setLang: (l: Lang) => void 
   );
 }
 
+/** Clears the demo so the next person can run the whole loop from an empty daftari. Two clicks, no dialog. */
+function StartOver({ sw, onReset }: { sw: boolean; onReset: () => Promise<void> }) {
+  const [state, setState] = useState<"idle" | "confirm" | "working">("idle");
+  useEffect(() => {
+    if (state !== "confirm") return;
+    const t = setTimeout(() => setState("idle"), 4000);
+    return () => clearTimeout(t);
+  }, [state]);
+  return (
+    <button
+      onClick={async () => {
+        if (state === "idle") return setState("confirm");
+        if (state !== "confirm") return;
+        setState("working");
+        try {
+          await onReset();
+        } finally {
+          setState("idle");
+        }
+      }}
+      disabled={state === "working"}
+      className={
+        "inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-sm font-semibold transition-colors disabled:opacity-60 " +
+        (state === "confirm" ? "bg-marigold text-ink" : "bg-ink-2/70 text-ink-soft hover:text-white")
+      }
+    >
+      <RotateCcw aria-hidden className="size-3.5" />
+      {state === "confirm"
+        ? sw ? "Futa yote? Bonyeza tena" : "Clear everything? Click again"
+        : state === "working"
+          ? sw ? "Inafuta…" : "Clearing…"
+          : sw ? "Anza upya" : "Start over"}
+    </button>
+  );
+}
+
 const RELATION_SW: Record<string, string> = { son: "mwanawe", daughter: "binti yake", granddaughter: "mjukuu wake", grandson: "mjukuu wake" };
 
 function City({ name, zone, who }: { name: string; zone: string; who: string }) {
@@ -182,6 +218,7 @@ function purchaseTag(e: Entry) {
 export default function TwoCities() {
   const { data, freshPaymentAt, refresh } = useLedger();
   const [lang, setLang] = useLang();
+  const [resetKey, setResetKey] = useState(0);
   const sw = lang === "sw";
   const [localAt, setLocalAt] = useState<string>("");
   const [tab, setTab] = useState<"app" | "whatsapp">("app");
@@ -196,6 +233,7 @@ export default function TwoCities() {
       seenChat.current = n;
       return;
     }
+    if (n < seenChat.current) seenChat.current = n; // the demo was started over
     if (n > seenChat.current) {
       const fromShop = chat.slice(seenChat.current).some((m) => m.from === "shop");
       if (fromShop) setTab("whatsapp");
@@ -261,6 +299,17 @@ export default function TwoCities() {
               : "A PayPal agent that speaks Swahili: one family wallet, two cities"}
           </p>
           <LangToggle lang={lang} setLang={setLang} />
+          <StartOver
+            sw={sw}
+            onReset={async () => {
+              await fetch("/api/reset", { method: "POST" });
+              setLocalAt("");
+              setTab("app");
+              setUnread(0);
+              setResetKey((k) => k + 1);
+              await refresh();
+            }}
+          />
         </div>
       </header>
 
@@ -298,6 +347,7 @@ export default function TwoCities() {
               {/* Both stay mounted so switching tabs never loses a recording or a reply. */}
               <div hidden={tab !== "app"}>
                 <TalkPanel
+                  key={resetKey}
                   compact
                   lang={lang}
                   onDone={() => {

@@ -77,3 +77,11 @@ export async function saveVoiceNote(data: Uint8Array, mimeType: string): Promise
   await fs.writeFile(path.join(MEDIA_DIR, name), data);
   return name;
 }
+
+/** Clear the WhatsApp mirror (messages and saved voice notes). */
+export function clearChat() {
+  return locked(async () => {
+    await fs.rm(FILE, { force: true });
+    await fs.rm(MEDIA_DIR, { recursive: true, force: true });
+  });
+}
