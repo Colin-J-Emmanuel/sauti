@@ -11,6 +11,7 @@
 </p>
 
 <p align="center">
+  <a href="https://youtu.be/3WlV8Vcl37M"><b>Demo video</b></a> ·
   <a href="https://sauti-yik2.onrender.com/demo"><b>Live demo</b></a> ·
   <a href="https://sauti-yik2.onrender.com">Shopkeeper app</a> ·
   <a href="#run-it-yourself">Run it yourself</a> ·
@@ -19,6 +20,13 @@
 
 > *Sauti* is Swahili for "voice". Everything here runs on PayPal's sandbox: the invoices, payments and webhooks are real
 > PayPal sandbox calls, and no real money moves.
+
+<p align="center">
+  <a href="https://youtu.be/3WlV8Vcl37M">
+    <img src="https://img.youtube.com/vi/3WlV8Vcl37M/maxresdefault.jpg" alt="Watch the Sauti demo video on YouTube (under 3 minutes)" width="720">
+  </a><br>
+  <sub>▶ Watch the demo (under 3 minutes)</sub>
+</p>
 
 ---
 
