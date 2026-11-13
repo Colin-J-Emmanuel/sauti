@@ -251,7 +251,7 @@ interface, Kalam for anything handwritten. Motion respects `prefers-reduced-moti
    does one thing and returns structured facts.
 4. **PayPal is the source of truth.** The wallet changes only on PayPal's word. `open_invoices` asks PayPal for live status
    before answering "who hasn't paid?", and the same check runs in the background (at most every 30 s, when the app is
-   open), so a webhook missed while the free server slept is caught up.
+   open), so a webhook missed while the server was restarting or redeploying is caught up.
 5. **Exactly-once settlement.** PayPal webhook signatures are verified through PayPal's `verify-webhook-signature` API;
    processed event ids are stored and retries ignored; `settleTopup` and `settleInvoice` only act on a request that is
    still open, so the webhook and the status check can't both credit it.
@@ -280,8 +280,13 @@ interface, Kalam for anything handwritten. Motion respects `prefers-reduced-moti
 15. **Honest errors.** If PayPal refuses a call, the reply says so and the step turns red with PayPal's own message. The
     agent is told to report any failed tool or PayPal call plainly and never claim success, and that Sauti can only request
     money, never send it.
-16. **Hackathon-sized storage.** JSON files in `data/` behind the write queue: easy to inspect and reset. Render's free
-    plan wipes them on each deploy, which doubles as a clean slate for every demo.
+16. **Hackathon-sized storage.** JSON files in `data/` behind the write queue: easy to inspect and reset. Render's
+    filesystem is rebuilt on every deploy, which doubles as a clean slate; between deploys, **Start over** on `/demo`
+    clears the demo in one click, keeping the customers and the shop's WhatsApp number.
+17. **Always on for judges.** The live demo runs on Render's **Starter** plan ($7/month, paid with hackathon credit)
+    instead of the free plan. Free services spin down after 15 idle minutes and take about a minute to wake, which would
+    greet a judge with a loading screen and could delay a PayPal webhook. Starter never sleeps, so the first voice note
+    and the payment confirmation are as fast as the hundredth.
 
 ## The interface
 
@@ -324,7 +329,7 @@ lib/
   history.ts                   Short conversation memory
 data/contacts.json             Customers and the relatives who fund their wallets
 scripts/                       test-agent.ts, test-unhappy.ts
-render.yaml                    Render blueprint (free plan)
+render.yaml                    Render blueprint (Starter plan, always on)
 ```
 
 ## Run it yourself
@@ -369,8 +374,10 @@ npm run dev          # http://localhost:3000 and http://localhost:3000/demo
 
 **Deploy**
 
-`render.yaml` is a Render blueprint on the free plan: connect the repo, fill in the environment variables, deploy. Every
-variable is documented in `.env.example`.
+`render.yaml` is a Render blueprint on the **Starter** plan (always on, no cold starts): connect the repo, fill in the
+environment variables, deploy. Every variable is documented in `.env.example`. To run it for free, change `plan: starter`
+to `plan: free`; everything works the same, but the service sleeps after 15 idle minutes and the next request takes about
+a minute while it wakes.
 
 ## Testing
 
@@ -406,7 +413,8 @@ curl -X POST localhost:3000/api/paypal/webhook -H 'Content-Type: application/jso
 - PayPal sandbox only. Production would need a PayPal business account per shop.
 - Sauti doesn't use the PayPal and M-Pesa link yet; Vodacom hasn't published limits or a full rollout date.
 - Meta's test number only messages verified recipients; a real deployment needs a WhatsApp Business number.
-- JSON-file storage and Render's free plan: data resets on deploy, and the first request after a quiet spell is slow.
+- JSON-file storage: data resets on every deploy (use **Start over** on `/demo` to reset without one). The live demo stays
+  fast because it runs on Render's Starter plan; on the free plan the first request after 15 idle minutes is slow.
 - A fixed TZS/USD rate.
 
 ## What's next

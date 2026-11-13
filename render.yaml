@@ -2,7 +2,7 @@ services:
   - type: web
     name: sauti
     runtime: node
-    plan: free
+    plan: starter  # always on; use `free` to run at no cost (sleeps after 15 idle minutes)
     buildCommand: npm install && npm run build
     startCommand: npm start
     envVars:
